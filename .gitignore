@@ -7,6 +7,10 @@
 !/mods/
 /mods/*
 !/mods/patcher/
+!/mods/claude-fork/
+!/mods/claude-new/
+!/mods/worktree-request/
+!/mods/worktree-sync/
 mods/**/gpui-kit.d.ts
 mods/**/jsconfig.json
 mods/patcher/.in-place/

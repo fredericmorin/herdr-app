@@ -1,7 +1,7 @@
 diff -ru a/mods/worktree/main.js b/mods/worktree/main.js
---- a/mods/worktree/main.js	2026-11-18 23:32:56
-+++ b/mods/worktree/main.js	2026-11-18 23:32:56
-@@ -22,6 +22,29 @@
+--- a/mods/worktree/main.js	2026-11-19 00:14:54
++++ b/mods/worktree/main.js	2026-11-19 00:14:54
+@@ -22,6 +22,33 @@
    if (!path.startsWith("/") && !/^[A-Za-z]:\//.test(path)) throw new Error("worktrees.directory must be an absolute path or start with ~/.");
    return path.replace(/\/+$/, "");
  }
@@ -11,15 +11,19 @@ diff -ru a/mods/worktree/main.js b/mods/worktree/main.js
 +  if (p === "~" || p.startsWith("~/")) p = userHome.replace(/\\/g, "/").replace(/\/$/, "") + p.slice(1);
 +  return p.replace(/\/+$/, "");
 +};
++// projects.json allows // and /* */ comments: blank them outside strings, keeping line numbers for errors.
++const uncomment = (text) =>
++  text.replace(/"(?:\\.|[^"\\])*"|\/\/[^\n]*|\/\*[\s\S]*?\*\//g, (m) => (m.startsWith('"') ? m : m.replace(/[^\n]/g, " ")));
 +// Per-project settings in ~/.config/herdr-app/projects.json, keyed by the repo's main checkout:
 +// { "projects": { "~/code/app": { "worktrees": { "directory": "~/worktrees/app", "setup": "direnv allow" } } } }
 +// directory: where new worktrees go (<directory>/<branch>; default <root>/<repo>/<branch>).
 +// setup: a sh script run in a new worktree's first terminal.
++// The file's commented reference is kept by mods/patcher/projects.js.
 +async function worktreeSettings(repo, root, userHome) {
 +  const raw = await readTextFile(`${appHome()}/projects.json`);
 +  let projects = {};
 +  if (raw !== null) {
-+    try { projects = JSON.parse(raw)?.projects ?? {}; } catch (error) { throw new Error(`projects.json: ${error.message}`); }
++    try { projects = JSON.parse(uncomment(raw))?.projects ?? {}; } catch (error) { throw new Error(`projects.json: ${error.message}`); }
 +  }
 +  const key = Object.keys(projects).find((k) => absolute(k, userHome) === repo.main);
 +  const { directory, setup } = (key && projects[key]?.worktrees) || {};
@@ -31,7 +35,7 @@ diff -ru a/mods/worktree/main.js b/mods/worktree/main.js
  // Home as ~ (git says C:/Users/x where Windows says C:\Users\x).
  const tilde = (path, userHome) => {
    const [p, h] = [path, userHome].map((s) => s.replace(/\\/g, "/"));
-@@ -155,6 +178,7 @@
+@@ -155,6 +182,7 @@
          this.folder = props()?.folder || place(this.space()) || this.userHome;
          // The repo is set last: Enter does nothing until the warnings it consents to are known.
          const repo = await repoOf(this.folder, this.on);
@@ -39,7 +43,7 @@ diff -ru a/mods/worktree/main.js b/mods/worktree/main.js
          if (repo && props().action === "remove") {
            this.dirty = (await git(repo.top, ["--no-optional-locks", "-c", "core.fsmonitor=false", "status", "--porcelain"], this.on)).out !== "";
            this.unpushed = (await submodules(repo.top, this.on)).unpushed;
-@@ -201,14 +225,17 @@
+@@ -201,14 +229,17 @@
    async create() {
      const branch = this.text.trim();
      if (!branch) return "Type a branch name.";
@@ -59,7 +63,7 @@ diff -ru a/mods/worktree/main.js b/mods/worktree/main.js
      return "";
    }
  
-@@ -339,7 +366,7 @@
+@@ -339,7 +370,7 @@
              ? !r.linked
                ? "This is the repository's main checkout, not a worktree."
                : `Closes the space and deletes ${tilde(r.top, this.userHome)}. The branch stays.`

@@ -32,6 +32,10 @@ The copies (`mods/my-*`, `layouts/my-main.json`, `AGENTS.md`) are generated: nev
 them, edit the patches. Each generated mod folder has a `GENERATED.md` listing the patches that
 changed it.
 
+At start it also runs `projects.js`: it keeps `~/.config/herdr-app/projects.json` (the
+per-project settings patches read) present, with a commented reference of every setting at
+its top, replaced whenever it differs from `REFERENCE` in `projects.js`.
+
 ## One patch per change, named after it
 
 A patch is one coherent change, across as many copies as it needs: `open-all-worktrees`

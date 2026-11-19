@@ -12,6 +12,7 @@
 import { View, div } from "gpui-kit";
 import { v_flex, h_flex } from "gpui-base";
 import { appHome, exec, readTextFile, writeTextFile, notify, props, closeOverlay, run, theme, shared, checking, updates } from "herdr";
+import { ensureProjects } from "./projects.js";
 
 // Herdr's originals that get a personal copy (a mod folder or a file), and the copy. A file
 // whose copy is itself (`to` = `from`) is patched in place: see original().
@@ -155,6 +156,10 @@ export default class Patcher extends View {
     this.error = "";
     if (checking()) return;
     this.apply(cx);
+    if (!this.overlay)
+      cx.spawn(async () => {
+        try { await ensureProjects(); } catch (error) { notify({ title: "Couldn't update projects.json", body: String(error), level: "error" }); }
+      });
   }
 
   apply(cx) {

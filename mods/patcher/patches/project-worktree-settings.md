@@ -18,6 +18,11 @@ In `mods/worktree` → `my-worktree` (the New / Open / Remove worktree dialog):
   `argv`), so its output shows there; a shell stays open after it. If the caller passed its
   own `argv` (an agent), that starts after the setup.
 - A repo with no entry keeps Herdr's folder and runs no setup.
+- `projects.json` may contain `//` and `/* */` comments (`uncomment()` blanks them outside
+  strings, keeping line numbers for parse errors).
+- At every start, `mods/patcher/projects.js` (outside this patch) creates `projects.json`
+  if it's missing and adds or refreshes the commented reference at its top. **When this patch
+  adds or changes a setting, update `REFERENCE` in `projects.js` in the same change.**
 - An invalid `projects.json` or value shows as an error in the dialog; nothing is created.
 
 ## What it expects from Herdr's original

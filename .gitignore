@@ -16,6 +16,7 @@
 !/mods/pr-flow/
 !/mods/vscode/
 !/mods/git-graph/
+!/mods/tab-history/
 mods/**/gpui-kit.d.ts
 mods/**/jsconfig.json
 mods/patcher/.in-place/

@@ -11,6 +11,7 @@
 !/mods/claude-new/
 !/mods/worktree-request/
 !/mods/worktree-sync/
+!/mods/pr-flow/
 mods/**/gpui-kit.d.ts
 mods/**/jsconfig.json
 mods/patcher/.in-place/

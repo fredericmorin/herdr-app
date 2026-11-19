@@ -24,6 +24,11 @@ version from Herdr and becomes the `.base`.
 It runs at every start (its floating block in `layouts/my-main.json`) and when opened:
 `herdr-app do mod.open --name patcher` shows each patch and copy and can apply again.
 
+After cloning this folder, nothing starts the patcher: the copies (`layouts/my-main.json`
+included) are generated and not in git, so Herdr shows its own `main` layout. Run
+`herdr-app do mod.open --name patcher` once and, when every patch shows ✓, click
+**Use the my-main layout**. From then on it runs at every start.
+
 All copies change together or not at all. When a patch fails, the last working copies
 stay, `~/.config/herdr-app/patcher.error` says which patch, file and line, and a toast
 appears (click it to open the patcher window).

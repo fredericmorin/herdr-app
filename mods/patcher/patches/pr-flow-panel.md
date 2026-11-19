@@ -8,7 +8,8 @@ Made on top of: `use-patched-copies`.
 ## What it does
 
 - `layouts/main.json` → `my-main.json`: a last child of the root row, the block
-  `pr-flow` (340px, resizable 280–600px), showing the `pr-flow` mod with its default props.
+  `pr-flow` (340px, resizable 280–600px), showing the `pr-flow` mod with
+  `"merge": "squash"`: a PR ready to merge gets a two-press `Merge (squash)` button.
   It sits right of the `work` column, after the root's divider.
 - `mods/pr-flow` itself isn't a copy of Herdr's: it's vendored as-is, with one local
   change (below). The patch only gives it a place: `my-main` is rebuilt at every start, so

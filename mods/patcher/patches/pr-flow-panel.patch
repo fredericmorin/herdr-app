@@ -1,7 +1,7 @@
 diff -ru a/layouts/main.json b/layouts/main.json
---- a/layouts/main.json	2026-11-19 08:49:59
-+++ b/layouts/main.json	2026-11-19 08:50:13
-@@ -181,6 +181,18 @@
+--- a/layouts/main.json	2026-11-19 09:49:55
++++ b/layouts/main.json	2026-11-19 09:49:55
+@@ -181,6 +181,21 @@
            }
          }
        ]
@@ -15,7 +15,10 @@ diff -ru a/layouts/main.json b/layouts/main.json
 +      "min": 280,
 +      "max": 600,
 +      "content": {
-+        "mod": "pr-flow"
++        "mod": "pr-flow",
++        "props": {
++          "merge": "squash"
++        }
 +      }
      }
    ]

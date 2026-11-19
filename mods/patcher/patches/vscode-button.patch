@@ -1,0 +1,14 @@
+diff -ru -U1 a/mods/tabs/main.js b/mods/tabs/main.js
+--- a/mods/tabs/main.js	2026-11-19 10:25:52
++++ b/mods/tabs/main.js	2026-11-19 10:25:52
+@@ -101,4 +101,9 @@
+     const stop = (_e, cx) => cx.stop_propagation();
+-    const button = (id, label, action) => div().id(id).size(26).flex_none().flex().items_center().justify_center().rounded(6).text_color(t.dim).hover(s => s.bg(t.hover).text_color(t.foreground))
++    const plainButton = (id, label, action) => div().id(id).size(26).flex_none().flex().items_center().justify_center().rounded(6).text_color(t.dim).hover(s => s.bg(t.hover).text_color(t.foreground))
+       .on_mouse_down("left", stop).on_click(action).child(label);
++    // The + gets an Open in VS Code button beside it (mods/vscode). Done here, not at the + call,
++    // because open-all-worktrees owns that line.
++    const button = (id, label, action) => id !== "tab-new" ? plainButton(id, label, action)
++      : h_flex().flex_none().gap(3).child(plainButton(id, label, action))
++        .child(plainButton("open-vscode", image("mods/vscode/icon.png").size(14), () => run("mod.open", { name: "vscode" })));
+     const item = (c, i) => {

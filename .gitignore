@@ -11,6 +11,8 @@
 !/mods/claude-new/
 !/mods/worktree-request/
 !/mods/worktree-sync/
+!/mods/worktree-jobs/
+!/mods/worktree-jobs-status/
 !/mods/pr-flow/
 !/mods/vscode/
 !/mods/git-graph/

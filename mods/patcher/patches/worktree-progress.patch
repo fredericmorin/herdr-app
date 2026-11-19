@@ -1,0 +1,48 @@
+diff -ru a/mods/worktree/main.js b/mods/worktree/main.js
+--- a/mods/worktree/main.js	2026-11-19 13:35:35
++++ b/mods/worktree/main.js	2026-11-19 13:36:04
+@@ -166,8 +166,10 @@
+         // done, so the keyboard must move there now — a focus call made while
+         // loading lands on nothing and the dialog stays keyboard-dead.
+         this.handle.focus();
+-        if (props().action !== "remove") cx.timer.after(100, () => this.input.focus());
++        if (props().action !== "remove" && !props().progress) cx.timer.after(100, () => this.input.focus());
+         if (props().branch) await this.work(cx);
++        // The progress view has no input: when an error brings the form back, the keyboard goes there.
++        if (props().progress && this.error) cx.timer.after(100, () => this.input.focus());
+       } catch (error) { this.repo = null; this.error = String(error); cx.notify(); }
+     });
+   }
+@@ -323,9 +325,32 @@
+       .child(h_flex().justify_end().text_size(11).text_color(t.dim).child("\u2191\u2193 choose \u00b7 \u21b5 open \u00b7 esc close"));
+   }
+ 
++  // { progress: true } with a branch (worktree-request): only what's being made, no form.
++  renderProgress(t) {
++    return v_flex()
++      .id("worktree")
++      .track_focus(this.handle)
++      .on_key_down((e, cx) => this.key(e, cx))
++      .size_full()
++      .p(16)
++      .gap(10)
++      .bg(t.popover)
++      .text_size(13)
++      .child(div().font_semibold().text_color(t.foreground).child(`Creating worktree ${this.text.trim()}`))
++      .child(
++        h_flex()
++          .gap(6)
++          .text_color(t.muted)
++          .child(div().frames(["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"], 90))
++          .child(this.repo ? `in ${this.repo.name}` : "…"),
++      );
++  }
++
+   render(cx) {
+     const t = theme();
+     if (this.opening) return this.renderOpen(t);
++    // An error (or no repo) brings the form back, to fix the branch and press Enter.
++    if (props()?.progress && !this.error && this.repo !== null) return this.renderProgress(t);
+     const remove = props()?.action === "remove";
+     const s = this.space();
+     const r = this.repo;

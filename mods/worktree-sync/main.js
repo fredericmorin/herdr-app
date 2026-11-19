@@ -38,7 +38,9 @@ function parse(text) {
   for (const block of text.split(/\n\n+/)) {
     const lines = block.split("\n");
     const path = lines.find((l) => l.startsWith("worktree "))?.slice(9);
-    if (!path || lines.some((l) => l === "bare" || l.startsWith("prunable"))) continue;
+    // While git worktree add runs, the checkout is "locked initializing", at first with no branch
+    // (so no claim matches): leave it out, to be judged once git is done.
+    if (!path || lines.some((l) => l === "bare" || l.startsWith("prunable") || l === "locked initializing")) continue;
     const branch = lines.find((l) => l.startsWith("branch "))?.slice(7).replace(/^refs\/heads\//, "") ?? null;
     list.push({ path, branch });
   }

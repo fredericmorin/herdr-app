@@ -1,7 +1,7 @@
 diff -ru a/mods/worktree/main.js b/mods/worktree/main.js
---- a/mods/worktree/main.js	2026-11-19 02:32:43
-+++ b/mods/worktree/main.js	2026-11-19 02:36:15
-@@ -22,6 +22,51 @@
+--- a/mods/worktree/main.js	2026-11-19 14:30:19
++++ b/mods/worktree/main.js	2026-11-19 14:30:37
+@@ -22,6 +22,55 @@
    if (!path.startsWith("/") && !/^[A-Za-z]:\//.test(path)) throw new Error("worktrees.directory must be an absolute path or start with ~/.");
    return path.replace(/\/+$/, "");
  }
@@ -48,12 +48,16 @@ diff -ru a/mods/worktree/main.js b/mods/worktree/main.js
 +  if (!lost.ok) throw new Error(lost.err || `Couldn't check branch ${name.out}.`);
 +  return { name: name.out, unpushed: lost.out !== "" };
 +}
-+// open-all-worktrees imports notify too: another name keeps the two patches independent.
-+import { notify as notice } from "herdr";
++// worktree-jobs (a floating mod) runs a queued creation, so closing this dialog doesn't stop it.
++// Aliased: sync-new-worktrees and remove-locked-worktrees import shared/setShared too.
++import { shared as readShared, setShared as writeShared } from "herdr";
++function queueCreation(job) {
++  writeShared("worktree-jobs.queue", [...(readShared("worktree-jobs.queue") ?? []), job]);
++}
  // Home as ~ (git says C:/Users/x where Windows says C:\Users\x).
  const tilde = (path, userHome) => {
    const [p, h] = [path, userHome].map((s) => s.replace(/\\/g, "/"));
-@@ -155,6 +200,9 @@
+@@ -155,6 +204,9 @@
          this.folder = props()?.folder || place(this.space()) || this.userHome;
          // The repo is set last: Enter does nothing until the warnings it consents to are known.
          const repo = await repoOf(this.folder, this.on);
@@ -63,29 +67,7 @@ diff -ru a/mods/worktree/main.js b/mods/worktree/main.js
          if (repo && props().action === "remove") {
            this.dirty = (await git(repo.top, ["--no-optional-locks", "-c", "core.fsmonitor=false", "status", "--porcelain"], this.on)).out !== "";
            this.unpushed = (await submodules(repo.top, this.on)).unpushed;
-@@ -186,6 +234,13 @@
-     cx.spawn(async (cx) => this.work(cx));
-   }
- 
-+  // After Remove worktree, its branch, when the project sets worktrees.deleteBranch. The
-+  // worktree is gone by then, so a branch that won't delete is a toast, not a dialog error.
-+  async deleteBranch() {
-+    const r = await git(this.repo.main, ["branch", "-D", this.branch.name], this.on);
-+    if (!r.ok) notice({ title: `Couldn't delete branch ${this.branch.name}`, body: r.err, level: "error" });
-+  }
-+
-   async work(cx) {
-     if (this.busy || !this.repo) return;
-     this.busy = true;
-@@ -194,6 +249,7 @@
-     try { this.error = props().action === "remove" ? await this.remove() : await this.create(); }
-     catch (error) { this.error = String(error); }
-     this.busy = false;
-+    if (!this.error && this.branch) await this.deleteBranch();
-     if (!this.error) this.close();
-     cx.notify();
-   }
-@@ -201,14 +257,17 @@
+@@ -201,14 +253,15 @@
    async create() {
      const branch = this.text.trim();
      if (!branch) return "Type a branch name.";
@@ -93,19 +75,20 @@ diff -ru a/mods/worktree/main.js b/mods/worktree/main.js
 +    const path = `${this.worktrees.dir}/${slug(branch)}`;
      const exists = (await git(this.repo.main, ["show-ref", "--verify", "--quiet", `refs/heads/${branch}`], this.on)).ok;
      const add = exists ? ["worktree", "add", path, branch] : ["worktree", "add", "-b", branch, path, "HEAD"];
-     const r = await git(this.repo.top, add, this.on, 600_000);
-     if (!r.ok) return r.err || "git worktree add failed.";
+-    const r = await git(this.repo.top, add, this.on, 600_000);
+-    if (!r.ok) return r.err || "git worktree add failed.";
      const p = props();
+-    // Leave spaces unnamed so they follow the checkout folder and nest under the repo.
+-    run("space.new", { folder: path, machine: this.on ?? "", tab: p.tab, argv: p.argv });
 +    // The project's setup runs first in the new space's terminal, where its output shows; a caller's agent starts after it.
 +    const setup = this.worktrees.setup;
 +    const argv = setup ? ["sh", "-c", p.argv ? `${setup}\nexec "$@"` : setup, "sh", ...(p.argv ?? [])] : p.argv;
-     // Leave spaces unnamed so they follow the checkout folder and nest under the repo.
--    run("space.new", { folder: path, machine: this.on ?? "", tab: p.tab, argv: p.argv });
-+    run("space.new", { folder: path, machine: this.on ?? "", tab: p.tab, argv });
++    // In the background: git worktree add, then the space; a toast says if git refuses.
++    queueCreation({ kind: "add", on: this.on ?? null, top: this.repo.top, add, path, tab: p.tab, argv });
      return "";
    }
  
-@@ -338,8 +397,8 @@
+@@ -338,8 +391,8 @@
            : remove
              ? !r.linked
                ? "This is the repository's main checkout, not a worktree."
@@ -116,7 +99,7 @@ diff -ru a/mods/worktree/main.js b/mods/worktree/main.js
      const blocked = !r || (remove && !r.linked);
      return v_flex()
        .id("worktree")
-@@ -367,6 +426,7 @@
+@@ -367,6 +420,7 @@
              .text_color(t.foreground),
          ),
        )

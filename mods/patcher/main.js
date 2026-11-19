@@ -27,7 +27,7 @@ const COPIES = [
 ];
 // patches/<name>.patch, applied in this order. use-patched-copies goes first; each of the
 // others is made on top of it alone, so they apply in any order and fail or get fixed alone.
-const PATCHES = ["use-patched-copies", "project-worktree-settings", "open-all-worktrees", "sync-new-worktrees", "remove-locked-worktrees", "agents-md-patcher", "space-git-tail", "space-pr-status", "pr-flow-panel", "claude-new-in-space-menu", "vscode-button"];
+const PATCHES = ["use-patched-copies", "project-worktree-settings", "open-all-worktrees", "sync-new-worktrees", "remove-locked-worktrees", "agents-md-patcher", "space-git-tail", "space-pr-status", "pr-flow-panel", "claude-new-in-space-menu", "vscode-button", "worktree-progress"];
 const LAYOUT = "my-main";
 // Herdr's version (.base) and the patched one installed (.out) of each in-place file. Hidden,
 // so writing them doesn't reload the mod.

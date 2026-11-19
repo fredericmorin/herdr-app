@@ -1,7 +1,38 @@
+diff -ru a/layouts/main.json b/layouts/main.json
+--- a/layouts/main.json	2026-11-19 14:49:38
++++ b/layouts/main.json	2026-11-19 14:49:45
+@@ -57,6 +57,17 @@
+               }
+             },
+             {
++              "id": "worktree-jobs-status",
++              "type": "block",
++              "hidden": true,
++              "size": {
++                "px": 32
++              },
++              "content": {
++                "mod": "worktree-jobs-status"
++              }
++            },
++            {
+               "id": "agents",
+               "type": "block",
+               "size": {
+@@ -72,6 +83,9 @@
+         {
+           "id": "sidebar-footer",
+           "type": "block",
++          "floating": [
++            { "id": "worktree-jobs", "content": { "mod": "worktree-jobs" }, "edge": "bottom", "align": "end" }
++          ],
+           "size": {
+             "px": 69
+           },
 diff -ru a/mods/worktree/main.js b/mods/worktree/main.js
---- a/mods/worktree/main.js	2026-11-18 23:50:21
-+++ b/mods/worktree/main.js	2026-11-18 23:50:21
-@@ -110,6 +110,23 @@
+--- a/mods/worktree/main.js	2026-11-19 14:49:38
++++ b/mods/worktree/main.js	2026-11-19 14:49:38
+@@ -110,6 +110,28 @@
    return { mods, unpushed };
  }
  
@@ -21,11 +52,16 @@ diff -ru a/mods/worktree/main.js b/mods/worktree/main.js
 +  } catch {}
 +  return reason ? ` (${reason})` : "";
 +}
++// worktree-jobs (a floating mod) runs a queued removal, so closing this dialog doesn't stop it.
++import { shared as sharedValue, setShared as setSharedValue } from "herdr";
++function queueRemoval(job) {
++  setSharedValue("worktree-jobs.queue", [...(sharedValue("worktree-jobs.queue") ?? []), job]);
++}
 +
  // The repo a folder belongs to: its main checkout and name, and whether
  // the folder is itself a linked worktree. null outside git.
  async function repoOf(folder, on) {
-@@ -142,6 +159,7 @@
+@@ -142,6 +164,7 @@
      this.repo = undefined; // undefined: looking, null: not in git
      this.dirty = false;
      this.unpushed = [];
@@ -33,7 +69,7 @@ diff -ru a/mods/worktree/main.js b/mods/worktree/main.js
      cx.spawn(async (cx) => {
        try {
          if (this.on) {
-@@ -158,6 +176,7 @@
+@@ -158,6 +181,7 @@
          if (repo && props().action === "remove") {
            this.dirty = (await git(repo.top, ["--no-optional-locks", "-c", "core.fsmonitor=false", "status", "--porcelain"], this.on)).out !== "";
            this.unpushed = (await submodules(repo.top, this.on)).unpushed;
@@ -41,7 +77,7 @@ diff -ru a/mods/worktree/main.js b/mods/worktree/main.js
          }
          if (repo && this.opening) this.list = await checkouts(repo, this.on);
          this.repo = repo;
-@@ -237,10 +256,18 @@
+@@ -237,11 +261,20 @@
      this.dirty ||= status.out !== "";
      this.unpushed = [...new Set([...this.unpushed, ...unpushed])];
      if (changed) return "It changed since this opened. Enter again removes it anyway.";
@@ -55,13 +91,16 @@ diff -ru a/mods/worktree/main.js b/mods/worktree/main.js
      run("space.close", { id: s.id, confirmed: true });
      const force = this.dirty || mods.length > 0;
 -    const r = await git(this.repo.main, ["worktree", "remove", ...(force ? ["--force"] : []), this.repo.top], this.on, 600_000);
+-    return r.ok ? "" : r.err || "git worktree remove failed.";
 +    // git removes a locked worktree only with --force twice, which also covers changes and submodules.
 +    const forced = this.locked !== null ? ["--force", "--force"] : force ? ["--force"] : [];
-+    const r = await git(this.repo.main, ["worktree", "remove", ...forced, this.repo.top], this.on, 600_000);
-     return r.ok ? "" : r.err || "git worktree remove failed.";
++    // In the background, then the branch when project-worktree-settings picked one (this.branch); a toast says how it went.
++    queueRemoval({ kind: "remove", on: this.on ?? null, main: this.repo.main, top: this.repo.top, forced, branch: this.branch?.name ?? null });
++    return "";
    }
  
-@@ -354,6 +381,7 @@
+   key(e, cx) {
+@@ -354,6 +387,7 @@
        .child(div().text_color(t.muted).child(detail))
        .when(remove && this.dirty, (el) => el.child(div().text_color(t.blocked).child("It has uncommitted changes: they will be lost.")))
        .when(remove && this.unpushed.length > 0, (el) => el.child(div().text_color(t.blocked).child(`Submodule ${this.unpushed.join(", ")} has commits that aren't pushed anywhere: they will be lost.`)))

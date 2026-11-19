@@ -18,12 +18,19 @@ In `mods/worktree` → `my-worktree` (the New / Open / Remove worktree dialog):
 - `setup`: runs with `sh -c` in the new space's first terminal (passed as `space.new`'s
   `argv`), so its output shows there; a shell stays open after it. If the caller passed its
   own `argv` (an agent), that starts after the setup.
+- Background creation: New worktree doesn't run `git worktree add` itself. It appends a job
+  `{ kind: "add", on, top, add, path, tab, argv }` to the shared value `worktree-jobs.queue`
+  and closes; `mods/worktree-jobs` (floated by `remove-locked-worktrees`) runs the add, then
+  `space.new` with that `argv`, and posts an error toast if git refuses. Closing the dialog
+  early no longer leaves a worktree with no space. It's here because it replaces the
+  `space.new` line this patch already owns (for the setup).
 - `deleteBranch: true`: Remove worktree also deletes the worktree's branch with
-  `git branch -D`, after `git worktree remove` succeeds. The dialog says "Deletes branch
-  <name> too." instead of "The branch stays.", and warns in the `blocked` color when the
+  `git branch -D`, after `git worktree remove` succeeds. This patch only picks the branch
+  (`this.branch`); `remove-locked-worktrees` hands it to the background removal
+  (`mods/worktree-jobs`), which deletes it and says so in its toast. The dialog says "Deletes
+  branch <name> too." instead of "The branch stays.", and warns in the `blocked` color when the
   branch has commits on no other local branch and no remote (they will be lost). A detached
-  checkout has no branch to delete. If the branch won't delete, the worktree is already gone,
-  so it's a toast ("Couldn't delete branch …"), not a dialog error.
+  checkout has no branch to delete.
 - A top-level `"worktrees": { "deleteBranch": true }` (beside `projects`) is the default for
   every repo; a project's own `deleteBranch` (true or false) wins. It's the only default.
 - A repo with no entry keeps Herdr's folder and runs no setup; it deletes branches only when
@@ -46,17 +53,18 @@ the equivalent code now lives.
   settings right after `const repo = await repoOf(this.folder, this.on);` for New and Remove
   (`!this.opening`; Remove gets no `dir`), and for Remove with `deleteBranch` reads the branch
   (`branchOf`) into `this.branch`.
-- `work()`: `this.busy = false;` then `if (!this.error) this.close();`; the branch deletion
-  (`deleteBranch()`, a method inserted right before `async work(cx)`) goes between them.
-  It can't go at the end of `remove()` (`remove-locked-worktrees` owns those lines) nor on
-  `work()`'s `try` line (`sync-new-worktrees`). `notify` is imported on its own as `notice`,
-  next to `branchOf`, because `open-all-worktrees` adds `notify` to the main import line.
 - `repoOf(folder, on)` returns `{ top, main, name, linked }`, `main` being the main
   checkout's absolute path; projects.json keys are compared with it. `readTextFile` and
   `appHome` are already imported.
-- `create()`: `const path = \`${this.root}/${this.repo.name}/${slug(branch)}\`;`, then after
-  `git worktree add`: `const p = props();`, the comment "Leave spaces unnamed…", and
+- `create()`: `const path = \`${this.root}/${this.repo.name}/${slug(branch)}\`;`, the
+  `exists` / `add` lines (git's arguments), then
+  `const r = await git(this.repo.top, add, this.on, 600_000);`, its `if (!r.ok) return …`,
+  `const p = props();`, the comment "Leave spaces unnamed…", and
   `run("space.new", { folder: path, machine: this.on ?? "", tab: p.tab, argv: p.argv });`.
+  The patch replaces the git call through `space.new` with the queued job.
+- `branchOf()`'s end is followed by `queueCreation()` and its own
+  `import { shared as readShared, setShared as writeShared }` (aliased: `sync-new-worktrees`
+  and `remove-locked-worktrees` import them too).
 - `render()`: the New description string starting "A new space on a checkout in
   ${tilde(this.root, this.userHome)}/${r.name}/.", the Remove one ending "The branch stays.",
   and `.when(Boolean(this.error), …)`, before which the unpushed-branch warning goes (after
@@ -68,6 +76,8 @@ the equivalent code now lives.
 - New worktree in a repo listed in projects.json: the dialog names the project's folder, the
   checkout lands in `<directory>/<branch-slug>`, the setup's output shows in the new space's
   terminal and a shell prompt follows.
+- New worktree on a big repo, Enter, and click outside at once: the space still opens when git
+  is done. A branch git refuses (already checked out elsewhere): an error toast.
 - New worktree in a repo not listed: Herdr's usual folder, no setup.
 - Break projects.json (a stray comma): New worktree shows "projects.json: …" and makes nothing.
 - `"deleteBranch": true` on a project, Remove worktree on one of its worktrees: the dialog says

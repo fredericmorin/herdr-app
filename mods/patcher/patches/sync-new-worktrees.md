@@ -17,8 +17,9 @@ Made on top of: `use-patched-copies` (it extends its floating list in the layout
 
 worktree-sync itself (in `mods/worktree-sync/main.js`): for each repo with a space open, it
 opens a background space for any checkout that appears after it first saw the repo, unless
-claimed or already shown. It remembers the checkouts it has seen, so a space you close stays
-closed. Local repos are watched; every repo is looked at once a minute.
+claimed or already shown. A checkout `git worktree add` is still making (`locked initializing`,
+at first without its branch) waits until git is done. It remembers the checkouts it has seen,
+so a space you close stays closed. Local repos are watched; every repo is looked at once a minute.
 
 ## What it expects from Herdr's original
 

@@ -1,0 +1,11 @@
+# Allowlist: only personal config and own mods; everything else is written by Herdr.
+/*
+!/.gitignore
+!/keys.json
+!/settings.json
+!/programs.json
+!/mods/
+/mods/*
+!/mods/patcher/
+mods/**/gpui-kit.d.ts
+mods/**/jsconfig.json

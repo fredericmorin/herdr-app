@@ -1,0 +1,71 @@
+diff -ru a/mods/worktree/main.js b/mods/worktree/main.js
+--- a/mods/worktree/main.js	2026-11-18 23:50:21
++++ b/mods/worktree/main.js	2026-11-18 23:50:21
+@@ -110,6 +110,23 @@
+   return { mods, unpushed };
+ }
+ 
++// A linked worktree's lock (`git worktree lock`, or an app keeping its worktrees locked):
++// the reason ("" when none), or null when it isn't locked. Git keeps it in <git dir>/locked.
++async function lockOf(top, on) {
++  const gitDir = await git(top, ["rev-parse", "--absolute-git-dir"], on);
++  if (!gitDir.ok) return null;
++  const reason = await readTextFile(`${gitDir.out}/locked`, { on });
++  return reason === null ? null : reason.trim();
++}
++// How a lock reads: " by supacode" for an app's JSON reason ({"owner": …}), else the reason.
++function lockedBy(reason) {
++  try {
++    const owner = JSON.parse(reason)?.owner;
++    if (typeof owner === "string") return ` by ${owner}`;
++  } catch {}
++  return reason ? ` (${reason})` : "";
++}
++
+ // The repo a folder belongs to: its main checkout and name, and whether
+ // the folder is itself a linked worktree. null outside git.
+ async function repoOf(folder, on) {
+@@ -142,6 +159,7 @@
+     this.repo = undefined; // undefined: looking, null: not in git
+     this.dirty = false;
+     this.unpushed = [];
++    this.locked = null;
+     cx.spawn(async (cx) => {
+       try {
+         if (this.on) {
+@@ -158,6 +176,7 @@
+         if (repo && props().action === "remove") {
+           this.dirty = (await git(repo.top, ["--no-optional-locks", "-c", "core.fsmonitor=false", "status", "--porcelain"], this.on)).out !== "";
+           this.unpushed = (await submodules(repo.top, this.on)).unpushed;
++          this.locked = await lockOf(repo.top, this.on);
+         }
+         if (repo && this.opening) this.list = await checkouts(repo, this.on);
+         this.repo = repo;
+@@ -237,10 +256,18 @@
+     this.dirty ||= status.out !== "";
+     this.unpushed = [...new Set([...this.unpushed, ...unpushed])];
+     if (changed) return "It changed since this opened. Enter again removes it anyway.";
++    // A lock that appeared since it opened gets one more warning, like other new risk.
++    const locked = await lockOf(this.repo.top, this.on);
++    if (locked !== null && this.locked === null) {
++      this.locked = locked;
++      return `It's locked now${lockedBy(locked)}. Enter again removes it anyway.`;
++    }
+     // Terminals first: a shell sitting in the folder keeps it busy on Windows.
+     run("space.close", { id: s.id, confirmed: true });
+     const force = this.dirty || mods.length > 0;
+-    const r = await git(this.repo.main, ["worktree", "remove", ...(force ? ["--force"] : []), this.repo.top], this.on, 600_000);
++    // git removes a locked worktree only with --force twice, which also covers changes and submodules.
++    const forced = this.locked !== null ? ["--force", "--force"] : force ? ["--force"] : [];
++    const r = await git(this.repo.main, ["worktree", "remove", ...forced, this.repo.top], this.on, 600_000);
+     return r.ok ? "" : r.err || "git worktree remove failed.";
+   }
+ 
+@@ -354,6 +381,7 @@
+       .child(div().text_color(t.muted).child(detail))
+       .when(remove && this.dirty, (el) => el.child(div().text_color(t.blocked).child("It has uncommitted changes: they will be lost.")))
+       .when(remove && this.unpushed.length > 0, (el) => el.child(div().text_color(t.blocked).child(`Submodule ${this.unpushed.join(", ")} has commits that aren't pushed anywhere: they will be lost.`)))
++      .when(remove && this.locked !== null, (el) => el.child(div().text_color(t.blocked).child(`It's locked${lockedBy(this.locked)}: removing it overrides the lock.`)))
+       .when(!remove && !blocked, (el) =>
+         el.child(
+           Input.new(this.input)

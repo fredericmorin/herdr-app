@@ -1,0 +1,80 @@
+diff -ru a/layouts/main.json b/layouts/main.json
+--- a/layouts/main.json	2026-11-18 23:32:56
++++ b/layouts/main.json	2026-11-18 23:32:56
+@@ -15,6 +15,9 @@
+     "width": 1,
+     "color": "border"
+   },
++  "floating": [
++    { "id": "patcher", "content": { "mod": "patcher" }, "edge": "bottom", "align": "end" }
++  ],
+   "children": [
+     {
+       "id": "sidebar",
+@@ -50,7 +53,7 @@
+               },
+               "min": 90,
+               "content": {
+-                "mod": "spaces"
++                "mod": "my-spaces"
+               }
+             },
+             {
+@@ -94,7 +97,7 @@
+           },
+           "window_drag": true,
+           "content": {
+-            "mod": "tabs"
++            "mod": "my-tabs"
+           }
+         },
+         {
+diff -ru a/mods/menu/main.js b/mods/menu/main.js
+--- a/mods/menu/main.js	2026-11-18 23:32:56
++++ b/mods/menu/main.js	2026-11-18 23:32:56
+@@ -112,7 +112,7 @@
+     const it = items(props(), this.git)[i];
+     if (!it) return;
+     closeOverlay(props()?.overlay);
+-    if (it[1] === "worktree") openOverlay({ mod: "worktree", kind: "dialog", ...(it[2].action === "open" ? { width: 560, height: 480 } : { width: 440, height: 260 }), props: it[2] });
++    if (it[1] === "worktree") openOverlay({ mod: "my-worktree", kind: "dialog", ...(it[2].action === "open" ? { width: 560, height: 480 } : { width: 440, height: 260 }), props: it[2] });
+     else run(it[1], it[2]);
+   }
+ 
+diff -ru a/mods/new-menu/main.js b/mods/new-menu/main.js
+--- a/mods/new-menu/main.js	2026-11-18 23:32:56
++++ b/mods/new-menu/main.js	2026-11-18 23:32:56
+@@ -67,7 +67,7 @@
+         .when(this.failed || this.agents.length === 0, el => el.child(div().px(9).py(6).text_color(t.dim).child(this.failed ? "Could not check installed agents" : "Checking installed agents…"))))
+       .child(div().h(1).mx(4).my(5).bg(t.border))
+       .child(this.row("space", div().w(14).child("+"), "New space", () => run("space.new"), shortcut("space.new")))
+-      .child(this.row("worktree", svg("mods/workspace-chrome/branch.svg").size(14), "New worktree…", () => openOverlay({ mod: "worktree", kind: "dialog", width: 460, height: 280, props: { space: space?.id, folder: panes().find(p => p.focused)?.cwd, action: "new" } }), "", Boolean(space)))
+-      .child(this.row("worktree-open", svg("mods/workspace-chrome/branch.svg").size(14), "Open worktree\u2026", () => openOverlay({ mod: "worktree", kind: "dialog", width: 560, height: 480, props: { space: space?.id, folder: panes().find(p => p.focused)?.cwd, action: "open" } }), "", Boolean(space)));
++      .child(this.row("worktree", svg("mods/workspace-chrome/branch.svg").size(14), "New worktree…", () => openOverlay({ mod: "my-worktree", kind: "dialog", width: 460, height: 280, props: { space: space?.id, folder: panes().find(p => p.focused)?.cwd, action: "new" } }), "", Boolean(space)))
++      .child(this.row("worktree-open", svg("mods/workspace-chrome/branch.svg").size(14), "Open worktree\u2026", () => openOverlay({ mod: "my-worktree", kind: "dialog", width: 560, height: 480, props: { space: space?.id, folder: panes().find(p => p.focused)?.cwd, action: "open" } }), "", Boolean(space)));
+   }
+ }
+diff -ru a/mods/spaces/main.js b/mods/spaces/main.js
+--- a/mods/spaces/main.js	2026-11-18 23:32:56
++++ b/mods/spaces/main.js	2026-11-18 23:32:56
+@@ -287,7 +287,7 @@
+ 
+   menu(w) {
+     // A popup is as tall as its items; height is only the most.
+-    openOverlay({ mod: "menu", kind: "popup", width: 200, height: 260, props: { tab: "space", target: { id: w.id } } });
++    openOverlay({ mod: "my-menu", kind: "popup", width: 200, height: 260, props: { tab: "space", target: { id: w.id } } });
+   }
+ 
+   orderingDue(now) {
+diff -ru a/mods/tabs/main.js b/mods/tabs/main.js
+--- a/mods/tabs/main.js	2026-11-18 23:32:56
++++ b/mods/tabs/main.js	2026-11-18 23:32:56
+@@ -147,7 +147,7 @@
+       .child(h_flex().id("tab-scroll").flex_1().min_w(0).h_full().items_center().gap(3).overflow_x_scrollbar().track_scroll(this.scroll)
+         .on_size_change((_size, cx) => { if (active >= 0) { this.scroll.scroll_to_item(active); cx.notify(); } })
+         .children(shown.map(item)))
+-      .child(button("tab-new", "+", () => openOverlay({ mod: "new-menu", kind: "popup", width: 250, height: 512 })))
++      .child(button("tab-new", "+", () => openOverlay({ mod: "my-new-menu", kind: "popup", width: 250, height: 512 })))
+       .when(enabled.includes("files"), el => el.child(panelButton("files", "Files", "mods/files/file.svg")))
+       .when(enabled.includes("changes"), el => el.child(panelButton("changes", "Changes", "mods/changes/changes.svg")))
+       .when(w?.buttons, el => el.child(button("minimize", w.platform === "windows" ? svg("mods/tabs/win-min.svg").size(16) : "−", () => run("window.minimize")))

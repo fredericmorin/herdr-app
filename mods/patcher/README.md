@@ -7,13 +7,19 @@ Herdr replaces its shipped mods and layouts at every start (an edited one is mov
 to `<name>-edited`), so they can't be changed in place. Instead, `main.js` has two lists:
 
 - `COPIES`: Herdr's originals that get a personal copy (`mods/worktree` → `mods/my-worktree`,
-  `layouts/main.json` → `layouts/my-main.json`, …);
+  `layouts/main.json` → `layouts/my-main.json`, …), or that are patched in place when
+  nothing reads a copy (`AGENTS.md` → `AGENTS.md`);
 - `PATCHES`: `patches/<name>.patch`, applied in that order.
 
 The patcher copies every original to a temporary folder at its own path
 (`mods/worktree/…`, `layouts/main.json`), applies each patch there with `git apply`
 (exact context, no fuzz), checks each copy that differs from the installed one
 (`herdr-app check` for a mod, valid JSON for a layout) and installs those.
+
+An in-place file is Herdr's version until the patcher installs over it. The patcher keeps
+Herdr's version in `.in-place/<file>.base` and what it installed in `.in-place/<file>.out`:
+while the file still matches `.out`, it patches `.base` again; anything else is a new
+version from Herdr and becomes the `.base`.
 
 It runs at every start (its floating block in `layouts/my-main.json`) and when opened:
 `herdr-app do mod.open --name patcher` shows each patch and copy and can apply again.
@@ -22,8 +28,8 @@ All copies change together or not at all. When a patch fails, the last working c
 stay, `~/.config/herdr-app/patcher.error` says which patch, file and line, and a toast
 appears (click it to open the patcher window).
 
-The copies (`mods/my-*`, `layouts/my-main.json`) are generated: never edit them, edit
-the patches. Each generated mod folder has a `GENERATED.md` listing the patches that
+The copies (`mods/my-*`, `layouts/my-main.json`, `AGENTS.md`) are generated: never edit
+them, edit the patches. Each generated mod folder has a `GENERATED.md` listing the patches that
 changed it.
 
 ## One patch per change, named after it
@@ -90,6 +96,7 @@ When Herdr updates and a patch fails:
    cd "$(mktemp -d)" && mkdir -p a/mods a/layouts
    cp -R $H/mods/worktree $H/mods/menu $H/mods/new-menu $H/mods/spaces $H/mods/tabs a/mods/
    cp $H/layouts/main.json a/layouts/
+   cp $H/mods/patcher/.in-place/AGENTS.md.base a/AGENTS.md   # only for a patch on AGENTS.md
    (cd a && git apply $P/use-patched-copies.patch)   # leave out when fixing the base itself
    cp -R a b
    (cd b && git apply --reject $P/open-all-worktrees.patch)

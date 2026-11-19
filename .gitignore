@@ -12,6 +12,8 @@
 !/mods/worktree-request/
 !/mods/worktree-sync/
 !/mods/pr-flow/
+!/mods/vscode/
+!/mods/git-graph/
 mods/**/gpui-kit.d.ts
 mods/**/jsconfig.json
 mods/patcher/.in-place/

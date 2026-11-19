@@ -1,0 +1,273 @@
+diff -ruN a/mods/spaces/main.js b/mods/spaces/main.js
+--- a/mods/spaces/main.js	2026-11-19 01:59:03
++++ b/mods/spaces/main.js	2026-11-19 01:59:48
+@@ -6,6 +6,7 @@
+ import { View, div, svg } from "gpui-kit";
+ import { v_flex, h_flex, ScrollHandle } from "gpui-base";
+ import { spaces, machines, panes, run, openOverlay, exec, hc, theme, shared, setShared, watchFolder, window, layout } from "herdr";
++import { PRStatusObserver, prBadge } from "./pr-status.js";
+ 
+ function find(node, id) {
+   if (node?.id === id) return node;
+@@ -81,6 +82,7 @@
+     this.scroll = ScrollHandle.new(); // the list's position: the active space is brought into view through it
+     this.activeAt = -1; // the active space's place among the list's children (headers and rows), -1 when not drawn
+     this.machines = [];
++    this.prs = new PRStatusObserver(); // each checkout's pull request, from gh
+     try {
+       this.reconnecting = JSON.parse(localStorage.getItem("machines.reconnecting") ?? "{}");
+       if (!this.reconnecting || typeof this.reconnecting !== "object" || Array.isArray(this.reconnecting)) this.reconnecting = {};
+@@ -99,6 +101,8 @@
+     for (const s of sp) if (!this.shown.has(s.id)) this.born[s.id] ??= now;
+     const due = this.due(now, sp, panes());
+     if (due.size) this.refreshGit(due, cx);
++    const ps = panes();
++    this.prs.refresh(sp.map((s) => ({ machine: s.machine, folder: place(s, ps), branch: this.git[where(s, ps)]?.branch })), cx);
+     if (sp.some((s) => !this.shown.has(s.id)) || this.orderingDue(now)) cx.notify();
+   }
+ 
+@@ -494,7 +498,8 @@
+           .when(Boolean(tree), el => el.pl(22).child(svg("mods/workspace-chrome/branch.svg").size(13).flex_none().text_color(t.dim)))
+           .when(!tree, el => el.child(h_flex().size(18).flex_none().rounded(5).bg(fill).items_center().justify_center().text_size(10.5).font_bold().text_color("#ffffff").child([...w.name][0]?.toUpperCase() ?? "?")))
+           .child(div().flex_initial().min_w(SIDE_MIN).truncate().text_color(t.foreground).child(w.name))
+-          .child(g ? this.gitTail(g, tree, w.name, t) : div().flex_1()),
++          .child(g ? this.gitTail(g, tree, w.name, t) : div().flex_1())
++          .child(prBadge(`space-${w.id}`, this.prs.status(w.machine, place(w, panes()), g?.branch), t)),
+       );
+   }
+ 
+diff -ruN a/mods/spaces/pr-icons/closed.svg b/mods/spaces/pr-icons/closed.svg
+--- a/mods/spaces/pr-icons/closed.svg	1969-12-31 19:00:00
++++ b/mods/spaces/pr-icons/closed.svg	2026-11-19 01:59:03
+@@ -0,0 +1 @@
++<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="6" cy="5" r="3"/><circle cx="6" cy="19" r="3"/><circle cx="18" cy="19" r="3"/><path d="M6 8v8M18 16V9m-3-7 6 6m0-6-6 6"/></svg>
+diff -ruN a/mods/spaces/pr-icons/draft.svg b/mods/spaces/pr-icons/draft.svg
+--- a/mods/spaces/pr-icons/draft.svg	1969-12-31 19:00:00
++++ b/mods/spaces/pr-icons/draft.svg	2026-11-19 01:59:03
+@@ -0,0 +1 @@
++<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="6" cy="5" r="3"/><circle cx="6" cy="19" r="3"/><circle cx="18" cy="5" r="3"/><circle cx="18" cy="19" r="3"/><path d="M6 8v8M18 10v1m0 2v1"/></svg>
+diff -ruN a/mods/spaces/pr-icons/merged.svg b/mods/spaces/pr-icons/merged.svg
+--- a/mods/spaces/pr-icons/merged.svg	1969-12-31 19:00:00
++++ b/mods/spaces/pr-icons/merged.svg	2026-11-19 01:59:03
+@@ -0,0 +1 @@
++<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="6" cy="5" r="3"/><circle cx="6" cy="19" r="3"/><circle cx="18" cy="19" r="3"/><path d="M6 8v8M6 8c0 5 12 3 12 8"/></svg>
+diff -ruN a/mods/spaces/pr-icons/pull-request.svg b/mods/spaces/pr-icons/pull-request.svg
+--- a/mods/spaces/pr-icons/pull-request.svg	1969-12-31 19:00:00
++++ b/mods/spaces/pr-icons/pull-request.svg	2026-11-19 01:59:03
+@@ -0,0 +1 @@
++<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="4" cy="3" r="2"/><circle cx="4" cy="13" r="2"/><circle cx="12" cy="13" r="2"/><path d="M4 5v6M9 2h1a2 2 0 0 1 2 2v7M8 4l2-2-2-2"/></svg>
+diff -ruN a/mods/spaces/pr-status.js b/mods/spaces/pr-status.js
+--- a/mods/spaces/pr-status.js	1969-12-31 19:00:00
++++ b/mods/spaces/pr-status.js	2026-11-19 01:59:33
+@@ -0,0 +1,211 @@
++// Each space's pull request, from the local GitHub CLI: read-only discovery per
++// [machine, checkout], and the badge a space row shows. Git runs on the space's
++// machine, gh runs here with the person's own login.
++// Adapted from Better Sidebar's git/pr-status.js (github.com/munza/herdr-mods,
++// Copyright 2026 Tawsif Aqib, Apache License 2.0).
++import { div, svg } from "gpui-kit";
++import { h_flex } from "gpui-base";
++import { exec, window } from "herdr";
++
++const PR_POLL_MS = 60000;
++const prPlaceKey = (machine, folder) => JSON.stringify([machine ?? null, folder]);
++const PR_FIELDS =
++  "id,number,title,url,state,isDraft,headRefName,headRepository,updatedAt,statusCheckRollup,reviewDecision,mergeStateStatus";
++
++// Terminal PR states win over draft/CI flags left over from when it was open.
++function prAppearance(pr, colors) {
++  if (pr.state === "MERGED") return { icon: "merged", color: colors.ansi5, label: "Merged" };
++  if (pr.state === "CLOSED") return { icon: "closed", color: colors.ansi1, label: "Closed" };
++  if (pr.isDraft) return { icon: "draft", color: colors.dim, label: "Draft" };
++  const failed = (pr.statusCheckRollup ?? []).some((check) =>
++    ["FAILURE", "ERROR", "TIMED_OUT", "ACTION_REQUIRED", "STARTUP_FAILURE"].includes(
++      String(check.conclusion || check.state || check.status).toUpperCase(),
++    ),
++  );
++  const open = (color, label, ready = false) => ({ icon: "pull-request", color, label, ready });
++  if (pr.mergeStateStatus === "DIRTY") return open(colors.ansi1, "Conflicts");
++  if (failed) return open(colors.ansi1, "Checks failed");
++  if (pr.reviewDecision === "CHANGES_REQUESTED") return open(colors.ansi3, "Changes requested");
++  // CLEAN is GitHub's own "mergeable now": an empty decision means no review is required.
++  if (pr.mergeStateStatus === "CLEAN" && (pr.reviewDecision === "APPROVED" || !pr.reviewDecision))
++    return open(colors.ansi2, "Ready to merge", true);
++  return open(colors.ansi2, "Open");
++}
++
++// Only github.com remotes are supported. Never pass an arbitrary remote URL to gh.
++function githubRepository(url) {
++  return /^(?:https?:\/\/github\.com\/|git@github\.com:|ssh:\/\/git@github\.com\/)([\w.-]+\/[\w.-]+?)(?:\.git)?\/?$/.exec(
++    url.trim(),
++  )?.[1];
++}
++
++// One observer per spaces list. refresh() runs on the list's fast timer, so it
++// does nothing (no task, no redraw) unless a checkout is due.
++export class PRStatusObserver {
++  constructor() {
++    this.places = new Map(); // Current checkout snapshots, replaced on refresh.
++    this.checked = new Map(); // Checkout key -> last attempt time and branch.
++    this.entries = new Map(); // Checkout key -> last published PRs or error.
++    this.cache = new Map(); // gh argument list -> short-lived response cache.
++  }
++
++  // places: [{ machine, folder, branch }]. A checkout is looked at once a minute,
++  // or at once when its branch changes.
++  refresh(places, cx) {
++    this.places = new Map(
++      places.filter((place) => place.folder).map((place) => [prPlaceKey(place.machine, place.folder), place]),
++    );
++    for (const key of this.entries.keys()) if (!this.places.has(key)) this.entries.delete(key);
++    for (const key of this.checked.keys()) if (!this.places.has(key)) this.checked.delete(key);
++    for (const [key, value] of this.cache) if (Date.now() - value.at >= PR_POLL_MS) this.cache.delete(key);
++    if (this.busy) return;
++
++    const due = [...this.places].filter(([key, place]) => {
++      const last = this.checked.get(key);
++      return !last || last.branch !== place.branch || Date.now() - last.at >= PR_POLL_MS;
++    });
++    if (!due.length) return;
++    this.busy = true;
++    cx.spawn(async (cx) => {
++      try {
++        for (const [key, place] of due) {
++          if (!this.isCurrent(key, place)) continue;
++          this.checked.set(key, { at: Date.now(), branch: place.branch });
++          try {
++            const prs = await this.lookup(place);
++            if (this.isCurrent(key, place)) this.entries.set(key, { prs, branch: place.branch });
++          } catch (error) {
++            if (this.isCurrent(key, place)) {
++              const previous = this.entries.get(key);
++              // Keep the last good PRs on a network error, never across a branch switch.
++              this.entries.set(key, {
++                prs: previous?.branch === place.branch ? previous.prs : [],
++                branch: place.branch,
++                error: error.message,
++              });
++            }
++          }
++          cx.notify();
++        }
++      } finally {
++        this.busy = false;
++      }
++    });
++  }
++
++  // What a row shows for a checkout: its PRs only while they describe the branch it is on.
++  status(machine, folder, branch) {
++    const entry = this.entries.get(prPlaceKey(machine, folder));
++    return entry && entry.branch === branch ? entry : null;
++  }
++
++  // A lookup may finish after a branch switch or the space closing: publish only if current.
++  isCurrent(key, place) {
++    return this.places.has(key) && this.places.get(key).branch === place.branch;
++  }
++
++  async lookup(place) {
++    const git = (args) => exec("git", ["--no-optional-locks", ...args], { cwd: place.folder, on: place.machine });
++    const head = await git(["symbolic-ref", "--quiet", "--short", "HEAD"]);
++    if (head.code !== 0) {
++      if (head.code === 1 || /not a git repository/i.test(head.stderr ?? "")) return [];
++      throw new Error("Cannot read checkout branch");
++    }
++    const branch = head.stdout.trim();
++    // An explicit binding (`git config branch.<b>.herdr-pr owner/repo#42`) wins over guessing.
++    const association = await git(["config", "--get", `branch.${branch}.herdr-pr`]);
++    if (association.code !== 0 && association.code !== 1) throw new Error("Cannot read PR association");
++    const binding = /^([\w.-]+\/[\w.-]+)#([1-9][0-9]*)$/.exec(association.stdout?.trim() ?? "");
++    if (binding) {
++      const pr = await this.query(["pr", "view", binding[2], "--repo", binding[1], "--json", PR_FIELDS]);
++      return [{ ...pr, repository: binding[1] }];
++    }
++
++    const remotes = await git(["remote"]);
++    if (remotes.code !== 0) throw new Error("Cannot read Git remotes");
++    const repositories = new Set();
++    for (const name of remotes.stdout.trim().split(/\r?\n/).filter(Boolean)) {
++      const result = await git(["remote", "get-url", name]);
++      if (result.code !== 0) throw new Error("Cannot read Git remote URL");
++      const repository = githubRepository(result.stdout);
++      if (repository) repositories.add(repository);
++    }
++
++    const candidates = [];
++    const knownHeads = new Set([...repositories].map((repo) => repo.toLowerCase()));
++    for (const repository of repositories) {
++      const found = await this.query([
++        "pr", "list", "--repo", repository, "--head", branch, "--state", "all", "--limit", "100", "--json", PR_FIELDS,
++      ]);
++      for (const pr of found) {
++        // Branch names aren't unique across forks: only heads in this checkout's own remotes.
++        if (pr.headRefName === branch && knownHeads.has(pr.headRepository?.nameWithOwner?.toLowerCase()))
++          candidates.push({ ...pr, repository });
++      }
++    }
++    const matches = [
++      ...new Map(candidates.map((pr) => [pr.id ?? `${pr.repository}#${pr.number}`, pr])).values(),
++    ].sort((a, b) => (b.updatedAt ?? "").localeCompare(a.updatedAt ?? ""));
++    // A reused branch shows its current PR, not a historical merged one.
++    const open = matches.filter((pr) => pr.state === "OPEN");
++    return open.length ? open : matches.slice(0, 1);
++  }
++
++  async query(args) {
++    const key = JSON.stringify(args);
++    const cached = this.cache.get(key);
++    if (cached && Date.now() - cached.at < PR_POLL_MS) return cached.data;
++    const at = Date.now();
++    const result = await exec("gh", args);
++    if (result.code !== 0) throw new Error((result.stderr || "GitHub unavailable; check gh auth login").trim());
++    const data = JSON.parse(result.stdout);
++    this.cache.set(key, { at, data });
++    return data;
++  }
++}
++
++// Cmd-click on macOS, Ctrl-click elsewhere, opens the PR; a plain click is the row's.
++const linkClick = (event) =>
++  window().platform === "macos"
++    ? Boolean(event.modifiers?.platform)
++    : Boolean(event.modifiers?.control || event.modifiers?.platform);
++
++// The badge at the right of a space row: icon and number in the PR's state color.
++// An empty element when there's nothing to show.
++export function prBadge(id, status, t) {
++  const prs = status?.prs ?? [];
++  if (!prs.length) {
++    if (!status?.error) return div();
++    return div().id(`${id}-pr`).flex_none().text_size(11).text_color(t.dim)
++      .tooltip(`PR unavailable: ${status.error}`).child("PR ?");
++  }
++  const pr = prs[0];
++  const look = prAppearance(pr, t);
++  const url = pr.url || `https://github.com/${pr.repository}/pull/${pr.number}`;
++  const shortcut = window().platform === "macos" ? "Cmd" : "Ctrl";
++  const stale = status.error ? `\nMay be stale: ${status.error}` : "";
++  const more = prs.slice(1).map((p) => `\n+ ${p.repository}#${p.number} · ${p.title}`).join("");
++  return h_flex()
++    .id(`${id}-pr`)
++    .flex_none()
++    .gap(3)
++    .items_center()
++    .text_size(11)
++    .text_color(look.color)
++    .cursor_pointer()
++    .tooltip(`${pr.repository}#${pr.number} · ${look.label}\n${pr.title}${more}${stale}\n${shortcut}-click to open`)
++    // Stop modified presses so the row neither starts a drag nor selects.
++    .on_mouse_down("left", (event, cx) => {
++      if (linkClick(event)) cx.stop_propagation();
++    })
++    .on_mouse_up("left", (event, cx) => {
++      if (linkClick(event)) cx.stop_propagation();
++    })
++    .on_click((event, cx) => {
++      if (!linkClick(event)) return;
++      cx.stop_propagation();
++      cx.open_url(url);
++    })
++    .child(svg(`mods/my-spaces/pr-icons/${look.icon}.svg`).size(13).flex_none())
++    .child(`#${pr.number}${look.ready ? " ✓" : ""}${prs.length > 1 ? ` +${prs.length - 1}` : ""}`);
++}

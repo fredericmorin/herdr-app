@@ -1,0 +1,52 @@
+diff -ruN a/mods/spaces/main.js b/mods/spaces/main.js
+--- a/mods/spaces/main.js	2026-11-19 01:59:03
++++ b/mods/spaces/main.js	2026-11-19 02:14:20
+@@ -254,6 +254,18 @@
+       const name = repo.endsWith("/.git") ? base(repo.slice(0, -5)) : base(repo).replace(/\.git$/, "");
+       const [ahead, behind] = counts.code === 0 ? counts.stdout.trim().split(/\s+/).map(Number) : [0, 0];
+       const info = { name, branch: branch.code === 0 ? branch.stdout.trim().replace(/^refs\/heads\//, "") : "(detached)", ahead, behind, repo: JSON.stringify([on, repo]), linked: repo !== `${top}/.git` };
++      // Uncommitted lines against HEAD, staged and unstaged (none before the first commit).
++      // No optional locks or fsmonitor: writing the index would wake the repo watch and loop.
++      const diff = await exec("git", ["--no-optional-locks", "-c", "core.fsmonitor=false", "diff", "--numstat", "HEAD"], { cwd, on });
++      info.added = 0;
++      info.removed = 0;
++      if (diff.code === 0) {
++        for (const line of diff.stdout.split("\n")) {
++          const [added, removed] = line.split("\t");
++          info.added += parseInt(added, 10) || 0;
++          info.removed += parseInt(removed, 10) || 0;
++        }
++      }
+       this.git[key] = info;
+       if (!on) this.watch(repo, cx);
+     } catch {
+@@ -427,7 +439,7 @@
+     const same = (a) => a.toLowerCase() === name.toLowerCase();
+     const branch = same(raw) || raw === "master" || raw === "main" ? "" : raw;
+     const repo = tree || same(g.name) ? "" : g.name;
+-    const where = [repo, branch].filter(Boolean).join(" \u00b7 ");
++    const where = g.worktree ?? [repo, branch].filter(Boolean).join(" \u00b7 ");
+     return h_flex()
+       .flex_auto()
+       .min_w(where ? SIDE_MIN : 0)
+@@ -436,12 +448,19 @@
+       .items_center()
+       .text_size(11.5)
+       .text_color(t.dim)
+-      .when(Boolean(where), (el) => el.child(div().min_w(0).truncate().child(where)))
++      .when(Boolean(where), (el) => el.child(div().flex_1().min_w(0).truncate().child(where)))
++      .when(g.added > 0, (el) => el.child(div().flex_none().text_color(t.ansi2).child(`+${g.added}`)))
++      .when(g.removed > 0, (el) => el.child(div().flex_none().text_color(t.ansi1).child(`\u2212${g.removed}`)))
+       .when(g.ahead > 0, (el) => el.child(div().flex_none().text_color(t.ansi2).child(`\u2191${g.ahead}`)))
+       .when(g.behind > 0, (el) => el.child(div().flex_none().text_color(t.ansi1).child(`\u2193${g.behind}`)));
+   }
+ 
+   row({ w, i, g, tree }, t) {
++    // A worktree reads as its branch, with its space's name quietly after it in the tail.
++    if (tree && g?.branch && g.branch !== "(detached)" && g.branch !== w.name) {
++      g = { ...g, worktree: w.name };
++      w = { ...w, name: g.branch };
++    }
+     const on = w.active;
+     const fromIndex = this.pressed === null ? -1 : spaces().findIndex(s => s.id === this.pressed);
+     const colors = shared("space.colors") ?? {};

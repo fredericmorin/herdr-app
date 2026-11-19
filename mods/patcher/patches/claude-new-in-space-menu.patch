@@ -1,0 +1,12 @@
+diff -ru -U1 a/mods/menu/main.js b/mods/menu/main.js
+--- a/mods/menu/main.js	2026-11-19 08:58:43
++++ b/mods/menu/main.js	2026-11-19 08:58:50
+@@ -67,2 +67,4 @@
+         ...(git === "linked" ? [["Remove worktree", "worktree", { space: tg.id, action: "remove" }]] : []),
++        // A 4th element is the props the mod opens with: claude-new starts in this space, not the focused one.
++        ["New Claude session", "mod.open", { name: "claude-new" }, { space: tg.id, folder: place(spaces().find((s) => s.id === tg.id) ?? {}) }],
+         ["Close", "space.close", { id: tg.id }],
+@@ -114,2 +116,3 @@
+     closeOverlay(props()?.overlay);
++    if (it[3]) return openOverlay({ mod: it[2].name, kind: "dialog", width: 560, props: it[3] });
+     if (it[1] === "worktree") openOverlay({ mod: "my-worktree", kind: "dialog", ...(it[2].action === "open" ? { width: 560, height: 480 } : { width: 440, height: 260 }), props: it[2] });

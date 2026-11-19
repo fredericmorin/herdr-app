@@ -9,11 +9,15 @@ const REFERENCE = `${START}
 // Per-project settings for Herdr. // and /* */ comments are allowed anywhere in this file.
 //
 // {
+//   "worktrees": {                             // defaults for every repo; a project's own setting wins
+//     "deleteBranch": true                     // the only default so far
+//   },
 //   "projects": {
 //     "~/code/app": {                          // the repo's main checkout (absolute or ~/)
 //       "worktrees": {                         // New worktree, in this repo
 //         "directory": "~/code/app/.worktrees", // where checkouts go: <directory>/<branch>; default <settings.json worktrees.directory>/<repo>/<branch>
-//         "setup": "direnv allow"              // sh script run in each new worktree's first terminal, before any agent
+//         "setup": "direnv allow",             // sh script run in each new worktree's first terminal, before any agent
+//         "deleteBranch": true                 // Remove worktree also deletes its branch (git branch -D); default: top-level worktrees.deleteBranch, else false
 //       }
 //     }
 //   }

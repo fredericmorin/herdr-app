@@ -1,7 +1,7 @@
 diff -ru a/mods/worktree/main.js b/mods/worktree/main.js
---- a/mods/worktree/main.js	2026-11-19 00:14:54
-+++ b/mods/worktree/main.js	2026-11-19 00:14:54
-@@ -22,6 +22,33 @@
+--- a/mods/worktree/main.js	2026-11-19 02:32:43
++++ b/mods/worktree/main.js	2026-11-19 02:36:15
+@@ -22,6 +22,51 @@
    if (!path.startsWith("/") && !/^[A-Za-z]:\//.test(path)) throw new Error("worktrees.directory must be an absolute path or start with ~/.");
    return path.replace(/\/+$/, "");
  }
@@ -18,32 +18,74 @@ diff -ru a/mods/worktree/main.js b/mods/worktree/main.js
 +// { "projects": { "~/code/app": { "worktrees": { "directory": "~/worktrees/app", "setup": "direnv allow" } } } }
 +// directory: where new worktrees go (<directory>/<branch>; default <root>/<repo>/<branch>).
 +// setup: a sh script run in a new worktree's first terminal.
++// deleteBranch: Remove worktree also deletes the worktree's branch.
++// A top-level { "worktrees": { "deleteBranch": true } } is the default for every repo; a project's own wins.
 +// The file's commented reference is kept by mods/patcher/projects.js.
 +async function worktreeSettings(repo, root, userHome) {
 +  const raw = await readTextFile(`${appHome()}/projects.json`);
-+  let projects = {};
++  let file = {};
 +  if (raw !== null) {
-+    try { projects = JSON.parse(uncomment(raw))?.projects ?? {}; } catch (error) { throw new Error(`projects.json: ${error.message}`); }
++    try { file = JSON.parse(uncomment(raw)) ?? {}; } catch (error) { throw new Error(`projects.json: ${error.message}`); }
 +  }
++  const projects = file.projects ?? {};
++  const fallback = file.worktrees?.deleteBranch;
++  if (fallback !== undefined && typeof fallback !== "boolean") throw new Error("projects.json: worktrees.deleteBranch must be true or false.");
 +  const key = Object.keys(projects).find((k) => absolute(k, userHome) === repo.main);
-+  const { directory, setup } = (key && projects[key]?.worktrees) || {};
++  const { directory, setup, deleteBranch } = (key && projects[key]?.worktrees) || {};
 +  if (directory !== undefined && (typeof directory !== "string" || !/^([A-Za-z]:)?\//.test(absolute(directory, userHome))))
 +    throw new Error(`projects.json: ${key}: worktrees.directory must be an absolute path or start with ~/.`);
 +  if (setup !== undefined && typeof setup !== "string") throw new Error(`projects.json: ${key}: worktrees.setup must be a string.`);
-+  return { dir: directory ? absolute(directory, userHome) : `${root}/${repo.name}`, setup: setup?.trim() ? setup : null };
++  if (deleteBranch !== undefined && typeof deleteBranch !== "boolean") throw new Error(`projects.json: ${key}: worktrees.deleteBranch must be true or false.`);
++  // Remove worktree has no root (it creates nothing), so it gets no dir.
++  return { dir: directory ? absolute(directory, userHome) : root && `${root}/${repo.name}`, setup: setup?.trim() ? setup : null, deleteBranch: (deleteBranch ?? fallback) === true };
 +}
++// The branch a checkout has out (null when detached), and whether it has commits that
++// exist on no other branch and no remote: deleting it would lose them.
++async function branchOf(top, on) {
++  const name = await git(top, ["symbolic-ref", "--quiet", "--short", "HEAD"], on);
++  if (!name.ok) return null;
++  const lost = await git(top, ["rev-list", "-n1", `refs/heads/${name.out}`, "--not", `--exclude=${name.out}`, "--branches", "--remotes"], on);
++  if (!lost.ok) throw new Error(lost.err || `Couldn't check branch ${name.out}.`);
++  return { name: name.out, unpushed: lost.out !== "" };
++}
++// open-all-worktrees imports notify too: another name keeps the two patches independent.
++import { notify as notice } from "herdr";
  // Home as ~ (git says C:/Users/x where Windows says C:\Users\x).
  const tilde = (path, userHome) => {
    const [p, h] = [path, userHome].map((s) => s.replace(/\\/g, "/"));
-@@ -155,6 +182,7 @@
+@@ -155,6 +200,9 @@
          this.folder = props()?.folder || place(this.space()) || this.userHome;
          // The repo is set last: Enter does nothing until the warnings it consents to are known.
          const repo = await repoOf(this.folder, this.on);
-+        if (repo && this.root) this.worktrees = await worktreeSettings(repo, this.root, this.userHome);
++        if (repo && !this.opening) this.worktrees = await worktreeSettings(repo, this.root, this.userHome);
++        // The branch Remove worktree deletes too, when the project asks for it.
++        if (repo && repo.linked && props().action === "remove" && this.worktrees.deleteBranch) this.branch = await branchOf(repo.top, this.on);
          if (repo && props().action === "remove") {
            this.dirty = (await git(repo.top, ["--no-optional-locks", "-c", "core.fsmonitor=false", "status", "--porcelain"], this.on)).out !== "";
            this.unpushed = (await submodules(repo.top, this.on)).unpushed;
-@@ -201,14 +229,17 @@
+@@ -186,6 +234,13 @@
+     cx.spawn(async (cx) => this.work(cx));
+   }
+ 
++  // After Remove worktree, its branch, when the project sets worktrees.deleteBranch. The
++  // worktree is gone by then, so a branch that won't delete is a toast, not a dialog error.
++  async deleteBranch() {
++    const r = await git(this.repo.main, ["branch", "-D", this.branch.name], this.on);
++    if (!r.ok) notice({ title: `Couldn't delete branch ${this.branch.name}`, body: r.err, level: "error" });
++  }
++
+   async work(cx) {
+     if (this.busy || !this.repo) return;
+     this.busy = true;
+@@ -194,6 +249,7 @@
+     try { this.error = props().action === "remove" ? await this.remove() : await this.create(); }
+     catch (error) { this.error = String(error); }
+     this.busy = false;
++    if (!this.error && this.branch) await this.deleteBranch();
+     if (!this.error) this.close();
+     cx.notify();
+   }
+@@ -201,14 +257,17 @@
    async create() {
      const branch = this.text.trim();
      if (!branch) return "Type a branch name.";
@@ -63,12 +105,22 @@ diff -ru a/mods/worktree/main.js b/mods/worktree/main.js
      return "";
    }
  
-@@ -339,7 +370,7 @@
+@@ -338,8 +397,8 @@
+           : remove
              ? !r.linked
                ? "This is the repository's main checkout, not a worktree."
-               : `Closes the space and deletes ${tilde(r.top, this.userHome)}. The branch stays.`
+-              : `Closes the space and deletes ${tilde(r.top, this.userHome)}. The branch stays.`
 -            : `A new space on a checkout in ${tilde(this.root, this.userHome)}/${r.name}/. A branch that exists is checked out; a new one starts from here.`;
++              : `Closes the space and deletes ${tilde(r.top, this.userHome)}. ${this.branch ? `Deletes branch ${this.branch.name} too.` : "The branch stays."}`
 +            : `A new space on a checkout in ${tilde(this.worktrees.dir, this.userHome)}/. A branch that exists is checked out; a new one starts from here.`;
      const blocked = !r || (remove && !r.linked);
      return v_flex()
        .id("worktree")
+@@ -367,6 +426,7 @@
+             .text_color(t.foreground),
+         ),
+       )
++      .when(remove && Boolean(this.branch?.unpushed), (el) => el.child(div().text_color(t.blocked).child(`Branch ${this.branch.name} has commits that are on no other branch or remote: they will be lost.`)))
+       .when(Boolean(this.error), (el) => el.child(div().text_color(t.blocked).child(this.error)))
+       .child(div().flex_1())
+       .child(

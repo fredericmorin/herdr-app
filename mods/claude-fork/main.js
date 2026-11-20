@@ -1,7 +1,8 @@
 // Forks the focused terminal's Claude Code session, history included (`mod.open claude-fork`),
 // either into a new worktree space (branch <current-branch>_fork from origin's default branch,
 // made by the worktree dialog so the project's setup runs; same as the herdr-fork Claude skill)
-// or into a new tab of the same space. Enter forks, Esc cancels.
+// or into a new tab of the same space. Enter forks, Tab moves between the checkbox and the branch,
+// Space flips the checkbox, Esc cancels.
 import { View, div } from "gpui-kit";
 import { v_flex, h_flex, InputState, Input } from "gpui-base";
 import { hc, home, readTextFile, focused, openOverlay, run, props, closeOverlay, notify, theme, checking } from "herdr";
@@ -14,8 +15,12 @@ export default class ClaudeFork extends View {
     this.handle = cx.focus_handle();
     this.branch = InputState.new({ placeholder: "Branch (optional, default <current-branch>_fork)" });
     this.branch.on("submit", (_e, cx) => this.submit(cx));
+    this.at = "branch"; // what has the keyboard, for Tab: "toggle" or "branch"
+    this.branch.on("focus", (_e, cx) => { this.at = "branch"; cx.notify(); });
+    this.toggleHandle = cx.focus_handle();
     this.branch.focus();
-    cx.timer.after(600, () => this.branch.focus());
+    // Refocus late in case opening took the keyboard, unless Tab has already moved on.
+    cx.timer.after(600, () => { if (this.at === "branch") this.branch.focus(); });
   }
 
   submit(cx) {
@@ -63,6 +68,19 @@ export default class ClaudeFork extends View {
   key(e, cx) {
     if (e.key === "escape") { closeOverlay(props().overlay); cx.stop_propagation(); }
     if (e.key === "enter") { this.submit(cx); cx.stop_propagation(); }
+    if (e.key === "tab") {
+      const order = this.worktree ? ["toggle", "branch"] : ["toggle"];
+      const step = e.modifiers.shift ? -1 : 1;
+      this.focusAt(order[(order.indexOf(this.at) + step + order.length) % order.length], cx);
+      cx.stop_propagation();
+    }
+  }
+
+  focusAt(at, cx) {
+    this.at = at;
+    if (at === "branch") this.branch.focus();
+    else this.toggleHandle.focus();
+    cx.notify();
   }
 
   render() {
@@ -71,12 +89,13 @@ export default class ClaudeFork extends View {
       .border_1().border_color(primary ? t.solid : t.input).bg(primary ? t.solid : t.raised)
       .text_color(primary ? t.solid_foreground : t.foreground).text_size(12.5).font_medium().cursor_pointer()
       .hover(s => s.opacity(0.88)).on_click(action).child(text);
-    const toggle = h_flex().id("cf-worktree").gap(8).items_center().cursor_pointer()
+    // Focusable so Tab reaches it; Space flips it through on_click (GPUI clicks a focused element on Space).
+    // Flipping leaves the keyboard on it, inside the dialog, so Enter still forks.
+    const toggle = h_flex().id("cf-worktree").track_focus(this.toggleHandle).gap(8).items_center().cursor_pointer()
+      .px(4).py(2).rounded(6).border_1().border_color(this.at === "toggle" ? t.accent : t.popover)
       .on_click((_e, cx) => {
         this.worktree = !this.worktree;
-        // The branch field goes with the worktree: keep Enter reaching the dialog.
-        (this.worktree ? this.branch : this.handle).focus();
-        cx.notify();
+        this.focusAt("toggle", cx);
       })
       .child(h_flex().w(16).h(16).rounded(4).border_1().items_center().justify_center()
         .border_color(this.worktree ? t.accent : t.input).bg(this.worktree ? t.accent : t.background)

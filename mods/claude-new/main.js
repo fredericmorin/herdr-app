@@ -4,9 +4,10 @@
 // Claude skill) or in a new tab of the focused space, in the focused terminal's folder.
 // Props { space, folder } (New worktree in the space menu and the + menu) target that space instead of the focused one.
 // The branch is required for a worktree; `claude -p` suggests one from the prompt while it's
-// typed (<user>_<words_with_underscores>, user from `whoami`), until the branch is edited by hand. Enter starts, Esc cancels.
+// typed (<user>_<words_with_underscores>, user from `whoami`), until the branch is edited by hand.
+// The message is multi-line: Enter adds a line, Cmd+Enter starts (Enter too, in the branch field), Esc cancels.
 import { View, div } from "gpui-kit";
-import { v_flex, h_flex, InputState, Input } from "gpui-base";
+import { v_flex, h_flex, InputState, Input, TextareaState, Textarea } from "gpui-base";
 import { openOverlay, run, focused, props, closeOverlay, theme, exec, home, checking } from "herdr";
 
 // How long typing pauses before the prompt is sent for a branch name.
@@ -40,11 +41,16 @@ export default class ClaudeNew extends View {
     if (!checking()) cx.spawn(async () => {
       try { this.user = (await exec("whoami", [])).stdout.trim(); } catch {}
     });
-    this.input = InputState.new({ placeholder: "First message (optional)" });
-    this.input.on("submit", (_e, cx) => this.submit(cx));
+    this.input = TextareaState.new({ placeholder: "First message (optional)", rows: 4 });
+    this.input.set_auto_grow(4, 14);
+    this.at = "message"; // what has the keyboard, for Tab: "message", "toggle" or "branch"
+    this.input.on("focus", (_e, cx) => { this.at = "message"; cx.notify(); });
     this.input.on("change", (_e, cx) => this.promptChanged(cx));
+    // The textarea's submit is Enter (a new line) or Cmd+Enter (secondary): only the latter starts.
+    this.input.on("submit", (e, cx) => { if (e.secondary) this.submit(cx); });
     this.branch = InputState.new({ placeholder: "Branch (required, suggested from the message)" });
     this.branch.on("submit", (_e, cx) => this.submit(cx));
+    this.branch.on("focus", (_e, cx) => { this.at = "branch"; cx.notify(); });
     this.branch.on("change", (_e, cx) => {
       const value = this.branch.value().trim();
       // Clearing the field hands it back to the suggestions.
@@ -53,8 +59,10 @@ export default class ClaudeNew extends View {
       cx.notify();
     });
     this.input.focus();
-    cx.timer.after(600, () => this.input.focus());
+    // Refocus late in case opening took the keyboard, unless Tab has already moved on.
+    cx.timer.after(600, () => { if (this.at === "message") this.input.focus(); });
     this.handle = cx.focus_handle();
+    this.toggleHandle = cx.focus_handle();
   }
 
   promptChanged(cx) {
@@ -117,6 +125,27 @@ export default class ClaudeNew extends View {
 
   key(e, cx) {
     if (e.key === "escape") { closeOverlay(props().overlay); cx.stop_propagation(); }
+    // Caught here, before the textarea takes Tab as indent.
+    else if (e.key === "tab") {
+      const order = this.worktree ? ["message", "toggle", "branch"] : ["message", "toggle"];
+      const step = e.modifiers.shift ? -1 : 1;
+      this.focusAt(order[(order.indexOf(this.at) + step + order.length) % order.length], cx);
+      cx.stop_propagation();
+    }
+  }
+
+  focusAt(at, cx) {
+    this.at = at;
+    if (at === "message") this.input.focus();
+    else if (at === "branch") this.branch.focus();
+    else this.toggleHandle.focus();
+    cx.notify();
+  }
+
+  toggleWorktree(cx) {
+    this.worktree = !this.worktree;
+    this.error = "";
+    cx.notify();
   }
 
   render() {
@@ -125,10 +154,13 @@ export default class ClaudeNew extends View {
       .border_1().border_color(primary ? t.solid : t.input).bg(primary ? t.solid : t.raised)
       .text_color(primary ? t.solid_foreground : t.foreground).text_size(12.5).font_medium().cursor_pointer()
       .hover(s => s.opacity(0.88)).on_click(action).child(text);
-    const field = (state, border) => Input.new(state).h(36).px(10).rounded(9).border_1().border_color(border)
+    const field = (el, border) => el.px(10).rounded(9).border_1().border_color(border)
       .bg(t.background).text_size(12.8).text_color(t.foreground);
-    const toggle = h_flex().id("cn-worktree").gap(8).items_center().cursor_pointer()
-      .on_click((_e, cx) => { this.worktree = !this.worktree; this.error = ""; cx.notify(); })
+    // Focusable so Tab reaches it; Space flips it through on_click (GPUI clicks a focused element on Space).
+    // The ring shows it has the keyboard.
+    const toggle = h_flex().id("cn-worktree").track_focus(this.toggleHandle).gap(8).items_center().cursor_pointer()
+      .px(4).py(2).rounded(6).border_1().border_color(this.at === "toggle" ? t.accent : t.popover)
+      .on_click((_e, cx) => this.toggleWorktree(cx))
       .child(h_flex().w(16).h(16).rounded(4).border_1().items_center().justify_center()
         .border_color(this.worktree ? t.accent : t.input).bg(this.worktree ? t.accent : t.background)
         .text_size(11).text_color(t.accent_foreground).child(this.worktree ? "✓" : ""))
@@ -145,10 +177,10 @@ export default class ClaudeNew extends View {
         .child(this.worktree
           ? `A new worktree of ${this.target?.cwd ?? "the focused terminal's repo"}, from origin's default branch`
           : `A new tab in this space, in ${this.target?.cwd ?? "the focused terminal's folder"}`))
-      .child(field(this.input, t.accent))
+      .child(field(Textarea.new(this.input).py(8), t.accent))
       .child(div().h(12))
       .child(toggle)
-      .when(this.worktree, (el) => el.child(div().h(8)).child(field(this.branch, this.error ? t.blocked : t.input))
+      .when(this.worktree, (el) => el.child(div().h(8)).child(field(Input.new(this.branch).h(36), this.error ? t.blocked : t.input))
         .child(div().h(16).pt(4).text_size(11).text_color(note?.[1] ?? t.dim).child(note?.[0] ?? "")))
       .child(h_flex().pt(16).gap(8).justify_end()
         .child(button("cn-cancel", "Cancel", false, () => closeOverlay(props().overlay)))

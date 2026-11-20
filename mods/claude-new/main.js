@@ -2,7 +2,7 @@
 // either in a new worktree space of the focused terminal's repo (on a new branch from origin's
 // default branch, made by the worktree dialog so the project's setup runs; same as the herdr-new
 // Claude skill) or in a new tab of the focused space, in the focused terminal's folder.
-// Props { space, folder } (the space menu's item) target that space instead of the focused one.
+// Props { space, folder } (New worktree in the space menu and the + menu) target that space instead of the focused one.
 // The branch is required for a worktree; `claude -p` suggests one from the prompt while it's
 // typed (<user>_<words_with_underscores>, user from `whoami`), until the branch is edited by hand. Enter starts, Esc cancels.
 import { View, div } from "gpui-kit";

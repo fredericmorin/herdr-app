@@ -2,15 +2,19 @@
 // bucket of the chip's kanban view. Cards open in the browser, move to another bucket, or start
 // a Claude session (claude-new) with the ticket as its first message; confirming that dialog moves
 // the card to Plan (Plan mode ticked) or Doing and switches the `center` stack back to the terminals.
+// "+" in a column and Edit on a card open vikunja-task, which saves and pings the board to refresh.
 // Props { url, project }: the Vikunja instance and the parent project. Talks to Vikunja's own MCP
-// server (<url>/api/v2/mcp) with the token in ~/.config/herdr-app/.vikunja-token (git-ignored).
+// server (<url>/api/v2/mcp) through ./vikunja.js.
 import { View, div, svg } from "gpui-kit";
 import { v_flex, h_flex } from "gpui-base";
-import { props, theme, exec, openOverlay, readTextFile, appHome, checking, shared, layout, run } from "herdr";
+import { props, theme, exec, openOverlay, appHome, checking, shared, layout, run } from "herdr";
+import { mcp } from "./vikunja.js";
 
 const REFRESH = 60_000;
 // claude-new writes { plan, at, ref } here when Start is confirmed; the board then moves ref.task.
 const STARTED = "vikunja.started";
+// vikunja-task writes Date.now() here after a save; the board then refreshes.
+const CHANGED = "vikunja.changed";
 const named = (bucket, title) => (bucket?.title ?? "").trim().toLowerCase() === title;
 const COLUMN = 272;
 
@@ -22,11 +26,6 @@ function findNode(node, id) {
     if (found) return found;
   }
   return null;
-}
-
-// status: the HTTP status a tool reported ("404 Not Found: ..."), 0 without a token, -1 otherwise.
-class McpError extends Error {
-  constructor(status, message) { super(message); this.status = status; }
 }
 
 // "0001-01-01T00:00:00Z" means no due date.
@@ -54,34 +53,14 @@ export default class VikunjaBoard extends View {
     const stored = localStorage.getItem("started");
     this.lastStarted = stored ? Number(stored) : (shared(STARTED)?.at ?? 0);
     if (!stored) localStorage.setItem("started", String(this.lastStarted));
+    this.lastChanged = shared(CHANGED) ?? 0;
     if (checking()) return;
     cx.timer.every(REFRESH, (cx) => this.refresh(cx));
     this.refresh(cx);
   }
 
-  // One MCP tools/call. The server is stateless (no session id): every call is a single POST,
-  // answered as one server-sent event.
-  async mcp(tool, args) {
-    const file = `${appHome()}/.vikunja-token`;
-    if (!((await readTextFile(file)) ?? "").trim()) throw new McpError(0, "no token");
-    const body = JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name: tool, arguments: args } });
-    // curl, not fetch: the app's fetch fails to reach this host (private address) while curl does.
-    // The token goes to curl on stdin (-K -), never on a command line.
-    const script = 'printf \'header = "Authorization: Bearer %s"\\n\' "$(tr -d "[:space:]" < "$1")" | ' +
-      'curl -sS -m 20 -K - -X POST -H "Content-Type: application/json" -H "Accept: application/json, text/event-stream" ' +
-      '-H "MCP-Protocol-Version: 2025-06-18" --data "$3" -w "\\n%{http_code}" "$2"';
-    const r = await exec("sh", ["-c", script, "sh", file, `${this.url}/api/v2/mcp`, body]);
-    if (r.code !== 0) throw new McpError(-1, (r.stderr || `curl exited ${r.code}`).trim());
-    const cut = r.stdout.lastIndexOf("\n");
-    const status = Number(r.stdout.slice(cut + 1));
-    const text = r.stdout.slice(0, cut);
-    if (status < 200 || status >= 300) throw new McpError(status, `HTTP ${status}`);
-    const data = text.split("\n").filter(l => l.startsWith("data:")).map(l => l.slice(5).trim()).pop() ?? text;
-    const reply = JSON.parse(data);
-    if (reply.error) throw new McpError(-1, reply.error.message);
-    const out = reply.result?.content?.[0]?.text ?? "";
-    if (reply.result?.isError) throw new McpError(Number(out.match(/^(\d{3}) /)?.[1] ?? -1), out);
-    return JSON.parse(out);
+  mcp(tool, args) {
+    return mcp(this.url, tool, args);
   }
 
   // A tool behind do_action (find_action lists them; this token sees buckets and task moves there).
@@ -90,8 +69,10 @@ export default class VikunjaBoard extends View {
   }
 
   refresh(cx) {
-    if (this.loading) return;
+    // A refresh asked for mid-load (a save landed) runs again once this one ends.
+    if (this.loading) { this.again = true; return; }
     this.loading = true;
+    this.again = false;
     cx.notify();
     cx.spawn(async (cx) => {
       try {
@@ -127,6 +108,7 @@ export default class VikunjaBoard extends View {
       }
       this.loading = false;
       cx.notify();
+      if (this.again) this.refresh(cx);
     });
   }
 
@@ -193,8 +175,25 @@ export default class VikunjaBoard extends View {
     this.move({ id: s.ref.task }, bucket, cx);
   }
 
+  // Opens vikunja-task: a new task in bucket, or task to edit.
+  editTask(mode, bucket, task) {
+    const project = this.projects.find(p => p.id === this.selected);
+    if (!project) return;
+    openOverlay({ mod: "vikunja-task", kind: "dialog", width: 520, props: {
+      mode, url: this.url, project: project.id, view: project.view,
+      bucket: { id: bucket.id, title: bucket.title },
+      task: task ? { id: task.id, identifier: task.identifier || `#${task.index}`, title: task.title, description: task.description ?? "" } : null } });
+  }
+
   render(cx) {
     this.handleStarted(cx);
+    const changed = shared(CHANGED) ?? 0;
+    if (changed > this.lastChanged) {
+      this.lastChanged = changed;
+      // refresh() notifies, which render can't. A spawned body still runs inside render (and its
+      // throw left `loading` stuck): a timer calls it after render returns.
+      cx.timer.after(0, (cx) => this.refresh(cx));
+    }
     const t = theme();
     const stop = (_e, cx) => cx.stop_propagation();
     const project = this.projects.find(p => p.id === this.selected);
@@ -226,6 +225,7 @@ export default class VikunjaBoard extends View {
           .when(Boolean(date), el => el.child(div().text_size(11).text_color(date.late && !task.done ? t.blocked : t.dim).child(date.text)))))
         .child(h_flex().gap(4)
           .child(button(`start-${task.id}`, "Start", (_e, cx) => this.start(task, bucket, cx)))
+          .when(!this.readOnly, el => el.child(button(`edit-${task.id}`, "Edit", () => this.editTask("edit", bucket, task))))
           .when(!this.readOnly && this.buckets.length > 1, el => el.child(button(`move-${task.id}`, moving ? "Cancel" : "Move", (_e, cx) => { this.moving = moving ? null : task.id; cx.notify(); }))))
         .when(moving, el => el.child(h_flex().flex_wrap().gap(4)
           .children(this.buckets.filter(b => b.id !== bucket.id).map(b => button(`to-${task.id}-${b.id}`, `→ ${b.title}`, (_e, cx) => this.move(task, b, cx))))));
@@ -237,7 +237,9 @@ export default class VikunjaBoard extends View {
       return v_flex().id(`bucket-${bucket.id}`).w(COLUMN).flex_none().h_full().min_h(0).gap(8)
         .child(h_flex().gap(8).items_center().px(2)
           .child(div().font_semibold().text_size(12.5).text_color(t.foreground).child(bucket.title))
-          .child(div().text_size(11).text_color(bucket.limit > 0 && tasks.length > bucket.limit ? t.blocked : t.dim).child(count)))
+          .child(div().text_size(11).text_color(bucket.limit > 0 && tasks.length > bucket.limit ? t.blocked : t.dim).child(count))
+          .child(div().flex_1())
+          .when(!this.readOnly, el => el.child(button(`new-${bucket.id}`, "+", () => this.editTask("new", bucket, null)))))
         .child(v_flex().id(`cards-${bucket.id}`).flex_1().min_h(0).gap(8).overflow_y_scrollbar()
           .children(tasks.map(task => card(task, bucket)))
           .when(tasks.length === 0, el => el.child(div().p(10).text_size(11.5).text_color(t.dim).child("Nothing here"))));

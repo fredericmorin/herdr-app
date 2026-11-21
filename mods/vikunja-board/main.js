@@ -1,13 +1,17 @@
 // Kanban board of a Vikunja project and its sub-projects: one chip per project, one column per
 // bucket of the chip's kanban view. Cards open in the browser, move to another bucket, or start
-// a Claude session (claude-new) with the ticket as its first message.
+// a Claude session (claude-new) with the ticket as its first message; confirming that dialog moves
+// the card to Plan (Plan mode ticked) or Doing.
 // Props { url, project }: the Vikunja instance and the parent project. Talks to Vikunja's own MCP
 // server (<url>/api/v2/mcp) with the token in ~/.config/herdr-app/.vikunja-token (git-ignored).
 import { View, div, svg } from "gpui-kit";
 import { v_flex, h_flex } from "gpui-base";
-import { props, theme, exec, openOverlay, readTextFile, appHome, checking } from "herdr";
+import { props, theme, exec, openOverlay, readTextFile, appHome, checking, shared } from "herdr";
 
 const REFRESH = 60_000;
+// claude-new writes { plan, at, ref } here when Start is confirmed; the board then moves ref.task.
+const STARTED = "vikunja.started";
+const named = (bucket, title) => (bucket?.title ?? "").trim().toLowerCase() === title;
 const COLUMN = 272;
 
 // status: the HTTP status a tool reported ("404 Not Found: ..."), 0 without a token, -1 otherwise.
@@ -35,6 +39,11 @@ export default class VikunjaBoard extends View {
     this.noToken = false;
     this.moving = null;  // the task whose Move row is open
     this.readOnly = false;
+    // The last confirmed start handled. A copy with nothing stored takes the current one as handled,
+    // so it never replays an old start.
+    const stored = localStorage.getItem("started");
+    this.lastStarted = stored ? Number(stored) : (shared(STARTED)?.at ?? 0);
+    if (!stored) localStorage.setItem("started", String(this.lastStarted));
     if (checking()) return;
     cx.timer.every(REFRESH, (cx) => this.refresh(cx));
     this.refresh(cx);
@@ -135,13 +144,45 @@ export default class VikunjaBoard extends View {
     });
   }
 
-  start(task) {
-    const lines = [`${task.title}`, "", (task.description ?? "").trim(), "", `${this.url}/tasks/${task.id}`];
-    const message = lines.filter((l, i) => l !== "" || (i > 0 && lines[i - 1] !== "")).join("\n").trim();
-    openOverlay({ mod: "claude-new", kind: "dialog", width: 560, props: { message } });
+  // Reads the task again so the description is current, then opens claude-new with it. Plan mode is
+  // ticked unless the card is already in Plan (planning done: the next start is the work).
+  start(task, bucket, cx) {
+    const project = this.projects.find(p => p.id === this.selected);
+    cx.spawn(async () => {
+      let fresh = task;
+      try {
+        fresh = await this.mcp("tasks_read", { task: task.id, format: "markdown",
+          fields: ["id", "identifier", "index", "title", "description", "labels.title"] });
+      } catch {}  // the card's copy is at most a minute old: good enough to start from
+      const labels = (fresh.labels ?? []).map(l => l.title).filter(Boolean);
+      const lines = [`Vikunja task ${fresh.identifier || `#${fresh.index}`}: ${fresh.title}`, "",
+        (fresh.description ?? "").trim(), "",
+        ...(labels.length ? [`Labels: ${labels.join(", ")}`] : []), `${this.url}/tasks/${task.id}`];
+      const message = lines.filter((l, i) => l !== "" || (i > 0 && lines[i - 1] !== "")).join("\n").trim();
+      openOverlay({ mod: "claude-new", kind: "dialog", width: 560, props: {
+        message, plan: !named(bucket, "plan"), started: STARTED,
+        ref: { task: task.id, project: project?.id, view: project?.view } } });
+    });
+  }
+
+  // A start confirmed in claude-new: move its card to Plan or Doing, once.
+  handleStarted(cx) {
+    const s = shared(STARTED);
+    if (!s?.at || s.at <= this.lastStarted) return;
+    this.lastStarted = s.at;
+    localStorage.setItem("started", String(s.at));
+    const title = s.plan ? "Plan" : "Doing";
+    if (s.ref?.project !== this.selected) {
+      this.error = `Couldn't move task ${s.ref?.task} to ${title}: its project isn't the one shown.`;
+      return;
+    }
+    const bucket = this.buckets.find(b => named(b, title.toLowerCase()));
+    if (!bucket) { this.error = `No "${title}" bucket in this project's board.`; return; }
+    this.move({ id: s.ref.task }, bucket, cx);
   }
 
   render(cx) {
+    this.handleStarted(cx);
     const t = theme();
     const stop = (_e, cx) => cx.stop_propagation();
     const project = this.projects.find(p => p.id === this.selected);
@@ -172,7 +213,7 @@ export default class VikunjaBoard extends View {
             .bg(`#${(l.hex_color || "888888").replace(/^#/, "").slice(0, 6)}33`).text_color(t.foreground).child(l.title)))
           .when(Boolean(date), el => el.child(div().text_size(11).text_color(date.late && !task.done ? t.blocked : t.dim).child(date.text)))))
         .child(h_flex().gap(4)
-          .child(button(`start-${task.id}`, "Start", () => this.start(task)))
+          .child(button(`start-${task.id}`, "Start", (_e, cx) => this.start(task, bucket, cx)))
           .when(!this.readOnly && this.buckets.length > 1, el => el.child(button(`move-${task.id}`, moving ? "Cancel" : "Move", (_e, cx) => { this.moving = moving ? null : task.id; cx.notify(); }))))
         .when(moving, el => el.child(h_flex().flex_wrap().gap(4)
           .children(this.buckets.filter(b => b.id !== bucket.id).map(b => button(`to-${task.id}-${b.id}`, `→ ${b.title}`, (_e, cx) => this.move(task, b, cx))))));

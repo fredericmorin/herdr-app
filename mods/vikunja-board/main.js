@@ -1,18 +1,28 @@
 // Kanban board of a Vikunja project and its sub-projects: one chip per project, one column per
 // bucket of the chip's kanban view. Cards open in the browser, move to another bucket, or start
 // a Claude session (claude-new) with the ticket as its first message; confirming that dialog moves
-// the card to Plan (Plan mode ticked) or Doing.
+// the card to Plan (Plan mode ticked) or Doing and switches the `center` stack back to the terminals.
 // Props { url, project }: the Vikunja instance and the parent project. Talks to Vikunja's own MCP
 // server (<url>/api/v2/mcp) with the token in ~/.config/herdr-app/.vikunja-token (git-ignored).
 import { View, div, svg } from "gpui-kit";
 import { v_flex, h_flex } from "gpui-base";
-import { props, theme, exec, openOverlay, readTextFile, appHome, checking, shared } from "herdr";
+import { props, theme, exec, openOverlay, readTextFile, appHome, checking, shared, layout, run } from "herdr";
 
 const REFRESH = 60_000;
 // claude-new writes { plan, at, ref } here when Start is confirmed; the board then moves ref.task.
 const STARTED = "vikunja.started";
 const named = (bucket, title) => (bucket?.title ?? "").trim().toLowerCase() === title;
 const COLUMN = 272;
+
+function findNode(node, id) {
+  if (!node) return null;
+  if (node.id === id) return node;
+  for (const child of node.children ?? []) {
+    const found = findNode(child, id);
+    if (found) return found;
+  }
+  return null;
+}
 
 // status: the HTTP status a tool reported ("404 Not Found: ..."), 0 without a token, -1 otherwise.
 class McpError extends Error {
@@ -171,6 +181,8 @@ export default class VikunjaBoard extends View {
     if (!s?.at || s.at <= this.lastStarted) return;
     this.lastStarted = s.at;
     localStorage.setItem("started", String(s.at));
+    // The session started from the Board (tab.new already selected its tab): show it, even if the move fails.
+    if (findNode(layout(), "center")?.active === "board") run("layout.select", { stack: "center", child: "main" });
     const title = s.plan ? "Plan" : "Doing";
     if (s.ref?.project !== this.selected) {
       this.error = `Couldn't move task ${s.ref?.task} to ${title}: its project isn't the one shown.`;

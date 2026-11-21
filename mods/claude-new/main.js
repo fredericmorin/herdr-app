@@ -63,6 +63,12 @@ export default class ClaudeNew extends View {
     cx.timer.after(600, () => { if (this.at === "message") this.input.focus(); });
     this.handle = cx.focus_handle();
     this.toggleHandle = cx.focus_handle();
+    // The window binds Tab to move focus across the whole window, before any on_key_down
+    // sees it: bindings of our own, deeper in, come first and keep Tab in the dialog.
+    cx.bind_keys([
+      { keystroke: "tab", action: "claude_new_next", context: "ClaudeNew" },
+      { keystroke: "shift-tab", action: "claude_new_prev", context: "ClaudeNew" },
+    ]);
   }
 
   promptChanged(cx) {
@@ -125,13 +131,11 @@ export default class ClaudeNew extends View {
 
   key(e, cx) {
     if (e.key === "escape") { closeOverlay(props().overlay); cx.stop_propagation(); }
-    // Caught here, before the textarea takes Tab as indent.
-    else if (e.key === "tab") {
-      const order = this.worktree ? ["message", "toggle", "branch"] : ["message", "toggle"];
-      const step = e.modifiers.shift ? -1 : 1;
-      this.focusAt(order[(order.indexOf(this.at) + step + order.length) % order.length], cx);
-      cx.stop_propagation();
-    }
+  }
+
+  cycle(step, cx) {
+    const order = this.worktree ? ["message", "toggle", "branch"] : ["message", "toggle"];
+    this.focusAt(order[(order.indexOf(this.at) + step + order.length) % order.length], cx);
   }
 
   focusAt(at, cx) {
@@ -169,6 +173,9 @@ export default class ClaudeNew extends View {
       : this.naming ? ["Naming the branch from the message…", t.dim]
       : null;
     return v_flex().id("claude-new").track_focus(this.handle).on_key_down((e, cx) => this.key(e, cx))
+      .key_context("ClaudeNew")
+      .on_action("claude_new_next", (_e, cx) => this.cycle(1, cx))
+      .on_action("claude_new_prev", (_e, cx) => this.cycle(-1, cx))
       .w_full().p(18).bg(t.popover).text_color(t.foreground)
       .child(h_flex().items_center()
         .child(div().flex_1().text_size(15).font_semibold().child("New Claude session"))

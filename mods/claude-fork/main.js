@@ -15,12 +15,18 @@ export default class ClaudeFork extends View {
     this.handle = cx.focus_handle();
     this.branch = InputState.new({ placeholder: "Branch (optional, default <current-branch>_fork)" });
     this.branch.on("submit", (_e, cx) => this.submit(cx));
-    this.at = "branch"; // what has the keyboard, for Tab: "toggle" or "branch"
+    this.at = "toggle"; // what has the keyboard, for Tab: "toggle" or "branch"
     this.branch.on("focus", (_e, cx) => { this.at = "branch"; cx.notify(); });
     this.toggleHandle = cx.focus_handle();
-    this.branch.focus();
+    this.toggleHandle.focus();
     // Refocus late in case opening took the keyboard, unless Tab has already moved on.
-    cx.timer.after(600, () => { if (this.at === "branch") this.branch.focus(); });
+    cx.timer.after(600, () => { if (this.at === "toggle") this.toggleHandle.focus(); });
+    // The window binds Tab to move focus across the whole window, before any on_key_down
+    // sees it: bindings of our own, deeper in, come first and keep Tab in the dialog.
+    cx.bind_keys([
+      { keystroke: "tab", action: "claude_fork_next", context: "ClaudeFork" },
+      { keystroke: "shift-tab", action: "claude_fork_prev", context: "ClaudeFork" },
+    ]);
   }
 
   submit(cx) {
@@ -68,12 +74,11 @@ export default class ClaudeFork extends View {
   key(e, cx) {
     if (e.key === "escape") { closeOverlay(props().overlay); cx.stop_propagation(); }
     if (e.key === "enter") { this.submit(cx); cx.stop_propagation(); }
-    if (e.key === "tab") {
-      const order = this.worktree ? ["toggle", "branch"] : ["toggle"];
-      const step = e.modifiers.shift ? -1 : 1;
-      this.focusAt(order[(order.indexOf(this.at) + step + order.length) % order.length], cx);
-      cx.stop_propagation();
-    }
+  }
+
+  cycle(step, cx) {
+    const order = this.worktree ? ["toggle", "branch"] : ["toggle"];
+    this.focusAt(order[(order.indexOf(this.at) + step + order.length) % order.length], cx);
   }
 
   focusAt(at, cx) {
@@ -102,6 +107,9 @@ export default class ClaudeFork extends View {
         .text_size(11).text_color(t.accent_foreground).child(this.worktree ? "✓" : ""))
       .child(div().text_size(12.5).child("New worktree"));
     return v_flex().id("claude-fork").track_focus(this.handle).on_key_down((e, cx) => this.key(e, cx))
+      .key_context("ClaudeFork")
+      .on_action("claude_fork_next", (_e, cx) => this.cycle(1, cx))
+      .on_action("claude_fork_prev", (_e, cx) => this.cycle(-1, cx))
       .w_full().p(18).bg(t.popover).text_color(t.foreground)
       .child(h_flex().items_center()
         .child(div().flex_1().text_size(15).font_semibold().child("Fork Claude session"))

@@ -3,6 +3,8 @@
 // default branch, made by the worktree dialog so the project's setup runs; same as the herdr-new
 // Claude skill) or in a new tab of the focused space, in the focused terminal's folder.
 // Props { space, folder } (New worktree in the space menu and the + menu) target that space instead of the focused one.
+// Props { message } fill in the first message (the Vikunja board's Start).
+// The Plan mode checkbox starts Claude with `--permission-mode plan`; props { plan: true } tick it.
 // The branch is required for a worktree; `claude -p` suggests one from the prompt while it's
 // typed (<user>_<words_with_underscores>, user from `whoami`), until the branch is edited by hand.
 // The message is multi-line: Enter adds a line, Cmd+Enter starts (Enter too, in the branch field), Esc cancels.
@@ -32,6 +34,7 @@ export default class ClaudeNew extends View {
     const p = props();
     this.target = p?.space ? { space: p.space, cwd: p.folder } : focused();
     this.worktree = true;
+    this.plan = p?.plan === true;
     this.seq = 0;        // bumped on every prompt change: only the newest naming counts
     this.naming = false; // a claude -p call for the newest prompt is under way
     this.auto = "";      // the branch last filled in from the prompt
@@ -43,7 +46,7 @@ export default class ClaudeNew extends View {
     });
     this.input = TextareaState.new({ placeholder: "First message (optional)", rows: 4 });
     this.input.set_auto_grow(4, 14);
-    this.at = "message"; // what has the keyboard, for Tab: "message", "toggle" or "branch"
+    this.at = "message"; // what has the keyboard, for Tab: "message", "toggle", "plan" or "branch"
     this.input.on("focus", (_e, cx) => { this.at = "message"; cx.notify(); });
     this.input.on("change", (_e, cx) => this.promptChanged(cx));
     // The textarea's submit is Enter (a new line) or Cmd+Enter (secondary): only the latter starts.
@@ -58,11 +61,17 @@ export default class ClaudeNew extends View {
       this.error = "";
       cx.notify();
     });
+    // Props { message } (the Vikunja board's Start) fill the first message and suggest a branch from it.
+    if (p?.message) {
+      this.input.set_value(p.message);
+      this.promptChanged(cx);
+    }
     this.input.focus();
     // Refocus late in case opening took the keyboard, unless Tab has already moved on.
     cx.timer.after(600, () => { if (this.at === "message") this.input.focus(); });
     this.handle = cx.focus_handle();
     this.toggleHandle = cx.focus_handle();
+    this.planHandle = cx.focus_handle();
     // The window binds Tab to move focus across the whole window, before any on_key_down
     // sees it: bindings of our own, deeper in, come first and keep Tab in the dialog.
     cx.bind_keys([
@@ -119,8 +128,8 @@ export default class ClaudeNew extends View {
       return;
     }
     closeOverlay(props().overlay);
-    // `--` keeps a prompt that starts with "-" from being read as an option.
-    const argv = prompt ? ["claude", "--", prompt] : ["claude"];
+    // `--` keeps a prompt that starts with "-" from being read as an option, so options go before it.
+    const argv = ["claude", ...(this.plan ? ["--permission-mode", "plan"] : []), ...(prompt ? ["--", prompt] : [])];
     if (!this.worktree) {
       run("tab.new", { space: this.target?.space, folder: this.target?.cwd, argv });
       return;
@@ -134,7 +143,7 @@ export default class ClaudeNew extends View {
   }
 
   cycle(step, cx) {
-    const order = this.worktree ? ["message", "toggle", "branch"] : ["message", "toggle"];
+    const order = this.worktree ? ["message", "toggle", "plan", "branch"] : ["message", "toggle", "plan"];
     this.focusAt(order[(order.indexOf(this.at) + step + order.length) % order.length], cx);
   }
 
@@ -142,6 +151,7 @@ export default class ClaudeNew extends View {
     this.at = at;
     if (at === "message") this.input.focus();
     else if (at === "branch") this.branch.focus();
+    else if (at === "plan") this.planHandle.focus();
     else this.toggleHandle.focus();
     cx.notify();
   }
@@ -149,6 +159,11 @@ export default class ClaudeNew extends View {
   toggleWorktree(cx) {
     this.worktree = !this.worktree;
     this.error = "";
+    cx.notify();
+  }
+
+  togglePlan(cx) {
+    this.plan = !this.plan;
     cx.notify();
   }
 
@@ -162,13 +177,16 @@ export default class ClaudeNew extends View {
       .bg(t.background).text_size(12.8).text_color(t.foreground);
     // Focusable so Tab reaches it; Space flips it through on_click (GPUI clicks a focused element on Space).
     // The ring shows it has the keyboard.
-    const toggle = h_flex().id("cn-worktree").track_focus(this.toggleHandle).gap(8).items_center().cursor_pointer()
-      .px(4).py(2).rounded(6).border_1().border_color(this.at === "toggle" ? t.accent : t.popover)
-      .on_click((_e, cx) => this.toggleWorktree(cx))
+    const checkbox = (id, handle, at, on, label, action) => h_flex().id(id).track_focus(handle).gap(8).items_center()
+      .cursor_pointer().px(4).py(2).rounded(6).border_1().border_color(this.at === at ? t.accent : t.popover)
+      .on_click(action)
       .child(h_flex().w(16).h(16).rounded(4).border_1().items_center().justify_center()
-        .border_color(this.worktree ? t.accent : t.input).bg(this.worktree ? t.accent : t.background)
-        .text_size(11).text_color(t.accent_foreground).child(this.worktree ? "✓" : ""))
-      .child(div().text_size(12.5).child("New worktree"));
+        .border_color(on ? t.accent : t.input).bg(on ? t.accent : t.background)
+        .text_size(11).text_color(t.accent_foreground).child(on ? "✓" : ""))
+      .child(div().text_size(12.5).child(label));
+    const toggles = h_flex().gap(12)
+      .child(checkbox("cn-worktree", this.toggleHandle, "toggle", this.worktree, "New worktree", (_e, cx) => this.toggleWorktree(cx)))
+      .child(checkbox("cn-plan", this.planHandle, "plan", this.plan, "Plan mode", (_e, cx) => this.togglePlan(cx)));
     const note = this.error ? [this.error, t.blocked]
       : this.naming ? ["Naming the branch from the message…", t.dim]
       : null;
@@ -186,7 +204,7 @@ export default class ClaudeNew extends View {
           : `A new tab in this space, in ${this.target?.cwd ?? "the focused terminal's folder"}`))
       .child(field(Textarea.new(this.input).py(8), t.accent))
       .child(div().h(12))
-      .child(toggle)
+      .child(toggles)
       .when(this.worktree, (el) => el.child(div().h(8)).child(field(Input.new(this.branch).h(36), this.error ? t.blocked : t.input))
         .child(div().h(16).pt(4).text_size(11).text_color(note?.[1] ?? t.dim).child(note?.[0] ?? "")))
       .child(h_flex().pt(16).gap(8).justify_end()

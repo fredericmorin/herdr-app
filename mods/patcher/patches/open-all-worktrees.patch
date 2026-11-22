@@ -11,26 +11,19 @@ diff -ru a/mods/menu/main.js b/mods/menu/main.js
          ["Close", "space.close", { id: tg.id }],
        ];
 diff -ru a/mods/new-menu/main.js b/mods/new-menu/main.js
---- a/mods/new-menu/main.js	2026-11-18 23:32:56
-+++ b/mods/new-menu/main.js	2026-11-18 23:32:56
-@@ -50,7 +50,7 @@
-     const space = spaces().find(s => s.active);
-     const installed = this.agents.filter(a => a.installed);
+--- a/mods/new-menu/main.js	2026-11-22 11:04:36
++++ b/mods/new-menu/main.js	2026-11-22 11:05:23
+@@ -52,3 +52,3 @@
      const choices = this.failed ? installed : [...installed, ...this.agents.filter(a => !a.installed).slice(0, 2)];
 -    return v_flex().min_h(0).w_full().h(Math.min(491, 167 + Math.max(1, choices.length + (this.failed ? 1 : 0)) * 31)).bg(t.popover).p(5).text_size(12.8)
 +    return v_flex().min_h(0).w_full().h(Math.min(522, 198 + Math.max(1, choices.length + (this.failed ? 1 : 0)) * 31)).bg(t.popover).p(5).text_size(12.8)
        .id("new-menu").track_focus(this.handle)
-       .on_key_down((e) => {
-         if (e.modifiers.control || e.modifiers.platform || e.modifiers.alt) return;
-@@ -68,6 +68,7 @@
-       .child(div().h(1).mx(4).my(5).bg(t.border))
-       .child(this.row("space", div().w(14).child("+"), "New space", () => run("space.new"), shortcut("space.new")))
+@@ -70,3 +70,4 @@
        .child(this.row("worktree", svg("mods/workspace-chrome/branch.svg").size(14), "New worktree…", () => openOverlay({ mod: "my-worktree", kind: "dialog", width: 460, height: 280, props: { space: space?.id, folder: panes().find(p => p.focused)?.cwd, action: "new" } }), "", Boolean(space)))
 -      .child(this.row("worktree-open", svg("mods/workspace-chrome/branch.svg").size(14), "Open worktree\u2026", () => openOverlay({ mod: "my-worktree", kind: "dialog", width: 560, height: 480, props: { space: space?.id, folder: panes().find(p => p.focused)?.cwd, action: "open" } }), "", Boolean(space)));
 +      .child(this.row("worktree-open", svg("mods/workspace-chrome/branch.svg").size(14), "Open worktree\u2026", () => openOverlay({ mod: "my-worktree", kind: "dialog", width: 560, height: 480, props: { space: space?.id, folder: panes().find(p => p.focused)?.cwd, action: "open" } }), "", Boolean(space)))
 +      .child(this.row("worktree-open-all", svg("mods/workspace-chrome/branch.svg").size(14), "Open all worktrees", () => openOverlay({ mod: "my-worktree", kind: "dialog", width: 440, height: 260, props: { space: space?.id, folder: panes().find(p => p.focused)?.cwd, action: "open-all" } }), "", Boolean(space)));
    }
- }
 diff -ru a/mods/tabs/main.js b/mods/tabs/main.js
 --- a/mods/tabs/main.js	2026-11-18 23:32:56
 +++ b/mods/tabs/main.js	2026-11-18 23:32:56

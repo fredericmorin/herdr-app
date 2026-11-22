@@ -18,6 +18,7 @@
 !/mods/tab-history/
 !/mods/vikunja-board/
 !/mods/vikunja-task/
+!/mods/keybind/
 mods/**/gpui-kit.d.ts
 mods/**/jsconfig.json
 mods/patcher/.in-place/

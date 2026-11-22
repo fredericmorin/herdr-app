@@ -6,6 +6,7 @@
 // skill (~/.claude/skills) moves the card on from there, through the vikunja MCP server.
 // The card's model/ and effort/ labels pick claude-new's Model and Effort (Default without them).
 // "+" in a column (not Plan, Doing or Done) and Edit on a card open vikunja-task, which saves and pings the board to refresh.
+// `vikunja-board.new` (cmd-n through the keybind mod, while the board shows) is the To-Do column's "+".
 // Start labels the session's terminal vikunja.task=<id> (claude-new's label prop): while Claude runs
 // there, the card shows that session's space, tab and status, a click goes to it, and Start gives way
 // to a Vikunja button. A click on a column's title folds it to a strip (Done starts folded).
@@ -13,7 +14,7 @@
 // server (<url>/api/v2/mcp) through ./vikunja.js.
 import { View, div, svg } from "gpui-kit";
 import { v_flex, h_flex } from "gpui-base";
-import { props, theme, exec, openOverlay, appHome, checking, shared, layout, run, spaces, panes, agents, terminals } from "herdr";
+import { props, theme, nextCommand, exec, openOverlay, appHome, checking, shared, layout, run, spaces, panes, agents, terminals } from "herdr";
 import { mcp, setting, SETTING } from "./vikunja.js";
 
 const REFRESH = 60_000;
@@ -103,6 +104,11 @@ export default class VikunjaBoard extends View {
     if (!stored) localStorage.setItem("started", String(this.lastStarted));
     this.lastChanged = shared(CHANGED) ?? 0;
     if (checking()) return;
+    cx.spawn(async () => {
+      for (;;) {
+        if (await nextCommand() === "new") this.newTask();
+      }
+    });
     cx.timer.every(REFRESH, (cx) => this.refresh(cx));
     this.refresh(cx);
   }
@@ -258,6 +264,13 @@ export default class VikunjaBoard extends View {
       found.set(id, { pane: agent.pane, status: agent.status, where: `${at?.space ?? agent.space_name} › ${tab}` });
     }
     return found;
+  }
+
+  // A new task in the first column that takes one (To-Do), as its "+" does.
+  newTask() {
+    if (this.readOnly || this.noToken) return;
+    const bucket = this.buckets.find(b => named(b, "to-do")) ?? this.buckets.find(b => !NO_ADD.some(n => named(b, n)));
+    if (bucket) this.editTask("new", bucket, null);
   }
 
   // Opens vikunja-task: a new task in bucket, or task to edit.

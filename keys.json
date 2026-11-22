@@ -67,7 +67,8 @@
   },
   "layout:my-main": {
     "cmd-1": { "command": "layout.select", "args": { "stack": "center", "child": "main" } },
-    "cmd-2": { "command": "layout.select", "args": { "stack": "center", "child": "board" } }
+    "cmd-2": { "command": "layout.select", "args": { "stack": "center", "child": "board" } },
+    "cmd-n": "keybind.new"
   },
   "terminal": {
     "cmd-f": "terminal.search",

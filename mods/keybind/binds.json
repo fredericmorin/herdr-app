@@ -1,0 +1,6 @@
+{
+  "new": [
+    { "if": { "shown": "board" }, "do": "vikunja-board.new" },
+    { "do": "space.new" }
+  ]
+}

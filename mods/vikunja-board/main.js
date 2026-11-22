@@ -186,7 +186,8 @@ export default class VikunjaBoard extends View {
   }
 
   // Reads the task again so the description is current, then opens claude-new with it. Plan mode is
-  // ticked unless the card is already in Plan (planning done: the next start is the work).
+  // unticked when the card is already in Plan (planning done: the next start is the work); otherwise
+  // claude-new picks it (projects.json's board_start.plan, else ticked).
   // The session goes to the project's repo and space (matched by name), not the focused one.
   start(task, bucket, cx) {
     const project = this.projects.find(p => p.id === this.selected);
@@ -206,7 +207,7 @@ export default class VikunjaBoard extends View {
       const target = await targetOf(project?.title);
       const message = lines.filter((l, i) => l !== "" || (i > 0 && lines[i - 1] !== "")).join("\n").trim();
       openOverlay({ mod: "claude-new", kind: "dialog", width: 560, props: {
-        ...(target ?? {}), message, plan: !named(bucket, "plan"), started: STARTED, label: `${TASK}=${task.id}`,
+        ...(target ?? {}), message, ...(named(bucket, "plan") ? { plan: false } : {}), started: STARTED, label: `${TASK}=${task.id}`,
         model: setting(fresh.labels, "model"), effort: setting(fresh.labels, "effort"),
         ref: { task: task.id, project: project?.id, view: project?.view } } });
     });

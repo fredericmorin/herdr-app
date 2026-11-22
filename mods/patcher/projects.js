@@ -10,15 +10,21 @@ const REFERENCE = `${START}
 //
 // {
 //   "worktrees": {                             // defaults for every repo; a project's own setting wins
-//     "deleteBranch": true                     // the only default so far
+//     "deleteBranch": true
 //   },
+//   "board_start": { ... },                    // defaults for every repo, same shape as a project's
+//   "new_session": { ... },
 //   "projects": {
 //     "~/code/app": {                          // the repo's main checkout (absolute or ~/)
 //       "worktrees": {                         // New worktree, in this repo
 //         "directory": "~/code/app/.worktrees", // where checkouts go: <directory>/<branch>; default <settings.json worktrees.directory>/<repo>/<branch>
 //         "setup": "direnv allow",             // sh script run in each new worktree's first terminal, before any agent
 //         "deleteBranch": true                 // Remove worktree also deletes its branch (git branch -D); default: top-level worktrees.deleteBranch, else false
-//       }
+//       },
+//       "board_start": { "worktree": true, "plan": true },  // New Claude session's boxes on Board Start; default: top-level
+//                                                           // board_start, else both ticked (Plan unticked for a card in Plan)
+//       "new_session": { "worktree": true, "plan": false }  // ... on Cmd+Shift+N and New worktree; default: top-level
+//                                                           // new_session, else worktree ticked, plan not
 //     }
 //   }
 // }

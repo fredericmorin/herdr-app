@@ -6,7 +6,10 @@
 // { folder } alone (the Board, when the repo's main checkout has no space) targets that folder: a worktree of it,
 // or without one a new space there.
 // Props { message } fill in the first message (the Vikunja board's Start).
-// The Plan mode checkbox starts Claude with `--permission-mode plan`; props { plan: true } tick it.
+// The Plan mode checkbox starts Claude with `--permission-mode plan`; props { plan } tick or untick it.
+// Without props { plan }, New worktree and Plan mode start from projects.json's defaults for the
+// target's repo (`board_start` for a Board start, i.e. props { ref }; `new_session` otherwise), else worktree on and
+// plan on for the Board, off otherwise. A box clicked before projects.json is read keeps the click.
 // The Model and Effort rows add `--model` / `--effort`; Default adds neither. Props { model, effort } pick them
 // (the Board: the ticket's model/ and effort/ labels); a value not in the lists gets a chip of its own.
 // Props { started, ref }: on Start (not Cancel), shared state `started` gets { plan, at, ref } so the opener can react;
@@ -18,7 +21,7 @@
 // branch field), Esc cancels.
 import { View, div } from "gpui-kit";
 import { v_flex, h_flex, InputState, Input, TextareaState, Textarea } from "gpui-base";
-import { openOverlay, run, focused, props, closeOverlay, theme, exec, home, checking, setShared } from "herdr";
+import { openOverlay, run, focused, props, closeOverlay, theme, exec, home, checking, setShared, spaces, appHome, readTextFile } from "herdr";
 
 // How long typing pauses before the prompt is sent for a branch name.
 const DEBOUNCE = 700;
@@ -38,6 +41,43 @@ const withOwn = (list, value) => (!value || list.includes(value) ? list : [...li
 // Added to a Board start's message when Plan mode is ticked.
 const PLAN_ASK = "Before doing this, ask important clarifying questions to understand my goals.";
 
+// projects.json allows // and /* */ comments: blank them outside strings, keeping line numbers for errors.
+// Same as the worktree dialog's (a mod can't import another's files).
+const uncomment = (text) =>
+  text.replace(/"(?:\\.|[^"\\])*"|\/\/[^\n]*|\/\*[\s\S]*?\*\//g, (m) => (m.startsWith('"') ? m : m.replace(/[^\n]/g, " ")));
+const absolute = (path, userHome) => (path === "~" ? userHome : path.startsWith("~/") ? `${userHome}${path.slice(1)}` : path);
+
+// The repo's main checkout for a folder, or null outside git.
+async function mainCheckout(folder, on) {
+  const r = await exec("git", ["rev-parse", "--path-format=absolute", "--git-common-dir"], { cwd: folder, on });
+  const common = (r.stdout ?? "").trim();
+  if (r.code !== 0 || !common) return null;
+  return common.endsWith("/.git") ? common.slice(0, -5) : common;
+}
+
+// projects.json's `<kind>` ({ worktree?, plan? }) for the repo of folder: the project's own values
+// over the top-level ones. Throws "projects.json: …" on an invalid file or value.
+async function claudeDefaults(kind, folder, on) {
+  const raw = await readTextFile(`${appHome()}/projects.json`);
+  if (raw === null) return {};
+  let file;
+  try { file = JSON.parse(uncomment(raw)) ?? {}; } catch (error) { throw new Error(`projects.json: ${error.message}`); }
+  const main = folder ? await mainCheckout(folder, on) : null;
+  const userHome = home();
+  const key = main ? Object.keys(file.projects ?? {}).find((k) => absolute(k, userHome) === main) : undefined;
+  const own = (key && file.projects[key]?.[kind]) || {};
+  const top = file[kind] || {};
+  const out = {};
+  for (const name of ["worktree", "plan"]) {
+    for (const [where, value] of [[key, own[name]], [null, top[name]]]) {
+      if (value === undefined) continue;
+      if (typeof value !== "boolean") throw new Error(`projects.json: ${where ? `${where}: ` : ""}${kind}.${name} must be true or false.`);
+      out[name] ??= value;
+    }
+  }
+  return out;
+}
+
 // The model's reply as a slug: its last line, lowercase words joined by "_".
 function toSlug(text) {
   const line = text.trim().split("\n").pop() ?? "";
@@ -49,8 +89,20 @@ export default class ClaudeNew extends View {
     // Read now: the dialog takes the keyboard, the target is what was focused before it.
     const p = props();
     this.target = p?.space || p?.folder ? { space: p.space, cwd: p.folder } : focused();
+    this.board = Boolean(p?.ref);
     this.worktree = true;
-    this.plan = p?.plan === true;
+    this.plan = typeof p?.plan === "boolean" ? p.plan : this.board;
+    this.clicked = { worktree: false, plan: false }; // a box clicked by hand: projects.json no longer moves it
+    this.settingsError = "";
+    if (!checking()) cx.spawn(async (cx) => {
+      const on = spaces().find((s) => s.id === this.target?.space)?.machine ?? undefined;
+      try {
+        const d = await claudeDefaults(this.board ? "board_start" : "new_session", this.target?.cwd, on);
+        if (d.worktree !== undefined && !this.clicked.worktree) this.worktree = d.worktree;
+        if (d.plan !== undefined && !this.clicked.plan && typeof p?.plan !== "boolean") this.plan = d.plan;
+      } catch (error) { this.settingsError = error.message; }
+      cx.notify();
+    });
     this.model = typeof p?.model === "string" ? p.model : "";
     this.effort = typeof p?.effort === "string" ? p.effort : "";
     this.models = withOwn(MODELS, this.model);
@@ -197,12 +249,14 @@ export default class ClaudeNew extends View {
 
   toggleWorktree(cx) {
     this.worktree = !this.worktree;
+    this.clicked.worktree = true;
     this.error = "";
     cx.notify();
   }
 
   togglePlan(cx) {
     this.plan = !this.plan;
+    this.clicked.plan = true;
     cx.notify();
   }
 
@@ -262,6 +316,7 @@ export default class ClaudeNew extends View {
         .child(this.worktree
           ? `A new worktree of ${this.target?.cwd ?? "the focused terminal's repo"}, from origin's default branch`
           : `A new tab in this space, in ${this.target?.cwd ?? "the focused terminal's folder"}`))
+      .when(Boolean(this.settingsError), (el) => el.child(div().pb(10).text_size(11).text_color(t.blocked).child(this.settingsError)))
       .child(field(Textarea.new(this.input).py(8), t.accent))
       .child(div().h(12))
       .child(toggles)

@@ -1,0 +1,45 @@
+diff -ru a/frame/settings/main.js b/frame/settings/main.js
+--- a/frame/settings/main.js	2026-11-22 11:50:24
++++ b/frame/settings/main.js	2026-11-22 11:50:24
+@@ -3,6 +3,8 @@
+ import { View, div, svg, image } from "gpui-kit";
+ import { v_flex, h_flex, Scrollbar, InputState, Input, Popup } from "gpui-base";
+ import { hc, run, theme, themes, fonts, updates, telemetry, settings, layouts, shared, appHome, readTextFile, writeTextFile, playSound, props, closeOverlay, notify, window } from "herdr";
++// Projects: projects.json's editor, installed beside this screen by mods/patcher (settings-projects).
++import { ProjectsSection } from "./projects.js";
+ 
+ const I = (name) => `frame/settings/${name}.svg`;
+ 
+@@ -10,6 +12,7 @@
+   { id: "look", title: "Look", icon: "palette" },
+   ...(window()?.platform === "macos" ? [{ id: "keyboard", title: "Keyboard", icon: "keyboard" }] : []),
+   { id: "machines", title: "Machines", icon: "server" },
++  { id: "projects", title: "Projects", icon: "folder" },
+   { id: "alerts", title: "Alerts", icon: "bell" },
+   { id: "updates", title: "Updates", icon: "refresh" },
+   { id: "privacy", title: "Privacy", icon: "shield" },
+@@ -54,6 +57,7 @@
+     this.machineResults = {};
+     this.machineEdit = null;
+     this.machineNotice = null;
++    this.projects = new ProjectsSection(this, cx);
+     this.handle = cx.focus_handle();
+     this.handle.focus();
+     cx.spawn(async (cx) => {
+@@ -914,6 +918,7 @@
+               this.machineEdit = null;
+               this.handle.focus();
+               if (s.id === "machines") cx.spawn(async (cx) => { await this.loadMachines(); cx.notify(); });
++              if (s.id === "projects") this.projects.reload(cx);
+               cx.notify();
+             })
+             .child(svg(I(s.icon)).size(15).text_color(on ? t.accent : t.dim))
+@@ -979,6 +984,8 @@
+                         ? this.keyboard(t)
+                       : this.section === "machines"
+                         ? this.machines(t)
++                      : this.section === "projects"
++                        ? this.projects.render(t, cx)
+                       : this.section === "alerts"
+                         ? this.alerts(t)
+                         : this.section === "privacy"

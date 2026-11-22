@@ -4,17 +4,24 @@ Keeps personal changes to Herdr's own mods and layouts as patches on copies, so 
 copies follow Herdr's updates and a release that breaks a change is caught, not lost.
 
 Herdr replaces its shipped mods and layouts at every start (an edited one is moved aside
-to `<name>-edited`), so they can't be changed in place. Instead, `main.js` has two lists:
+to `<name>-edited`), so they can't be changed in place. Instead, `main.js` has three lists:
 
 - `COPIES`: Herdr's originals that get a personal copy (`mods/worktree` → `mods/my-worktree`,
   `layouts/main.json` → `layouts/my-main.json`, …), or that are patched in place when
-  nothing reads a copy (`AGENTS.md` → `AGENTS.md`);
-- `PATCHES`: `patches/<name>.patch`, applied in that order.
+  nothing reads a copy (`AGENTS.md` → `AGENTS.md`, and the Settings screen
+  `frame/settings/main.js`, which Herdr always opens from there);
+- `PATCHES`: `patches/<name>.patch`, applied in that order;
+- `FILES`: our own files installed unpatched beside an in-place file, so a patch there can stay a
+  few hooks while the code lives in a real file: `files/<path>` is installed at `<path>`
+  (`files/frame/settings/projects.js` → `frame/settings/projects.js`). Edit them in `files/`;
+  saving one reloads the patcher, which installs it.
 
 The patcher copies every original to a temporary folder at its own path
 (`mods/worktree/…`, `layouts/main.json`), applies each patch there with `git apply`
 (exact context, no fuzz), checks each copy that differs from the installed one
-(`herdr-app check` for a mod, valid JSON for a layout) and installs those.
+(`herdr-app check` for a mod, valid JSON for a layout) and installs those. A file under
+`frame/<screen>/` is checked with its whole screen: Herdr's folder, with the patched file and
+`FILES` over it, goes through `herdr-app check`.
 
 An in-place file is Herdr's version until the patcher installs over it. The patcher keeps
 Herdr's version in `.in-place/<file>.base` and what it installed in `.in-place/<file>.out`:
@@ -33,8 +40,8 @@ All copies change together or not at all. When a patch fails, the last working c
 stay, `~/.config/herdr-app/patcher.error` says which patch, file and line, and a toast
 appears (click it to open the patcher window).
 
-The copies (`mods/my-*`, `layouts/my-main.json`, `AGENTS.md`) are generated: never edit
-them, edit the patches. Each generated mod folder has a `GENERATED.md` listing the patches that
+The copies (`mods/my-*`, `layouts/my-main.json`, `AGENTS.md`, `frame/settings/main.js` and the
+installed `FILES`) are generated: never edit them, edit the patches and `files/`. Each generated mod folder has a `GENERATED.md` listing the patches that
 changed it.
 
 At start it also runs `projects.js`: it keeps `~/.config/herdr-app/projects.json` (the
@@ -106,6 +113,7 @@ When Herdr updates and a patch fails:
    cp -R $H/mods/worktree $H/mods/menu $H/mods/new-menu $H/mods/spaces $H/mods/tabs a/mods/
    cp $H/layouts/main.json a/layouts/
    cp $H/mods/patcher/.in-place/AGENTS.md.base a/AGENTS.md   # only for a patch on AGENTS.md
+   mkdir -p a/frame/settings && cp $H/mods/patcher/.in-place/frame/settings/main.js.base a/frame/settings/main.js   # only for settings-projects
    (cd a && git apply $P/use-patched-copies.patch)   # leave out when fixing the base itself
    cp -R a b
    (cd b && git apply --reject $P/open-all-worktrees.patch)

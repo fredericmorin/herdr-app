@@ -26,10 +26,15 @@ const COPIES = [
   { from: "mods/agents", to: "mods/my-agents" },
   { from: "mods/toast", to: "mods/my-toast" },
   { from: "layouts/main.json", to: "layouts/my-main.json" },
+  { from: "frame/settings/main.js", to: "frame/settings/main.js" },
 ];
+// Our own files, installed unpatched beside an in-place file of Herdr's (a Settings section next
+// to the patched Settings screen): each is mods/patcher/files/<path>, installed at <path>.
+const FILES = ["frame/settings/projects.js", "frame/settings/folder.svg"];
+const OWN = "mods/patcher/files";
 // patches/<name>.patch, applied in this order. use-patched-copies goes first; each of the
 // others is made on top of it alone, so they apply in any order and fail or get fixed alone.
-const PATCHES = ["use-patched-copies", "project-worktree-settings", "open-all-worktrees", "sync-new-worktrees", "remove-locked-worktrees", "agents-md-patcher", "space-git-tail", "space-pr-status", "new-worktree-opens-claude-new", "vscode-button", "worktree-progress", "tab-history-float", "board-toggle", "keybind-float", "new-space-here"];
+const PATCHES = ["use-patched-copies", "project-worktree-settings", "open-all-worktrees", "sync-new-worktrees", "remove-locked-worktrees", "agents-md-patcher", "space-git-tail", "space-pr-status", "new-worktree-opens-claude-new", "vscode-button", "worktree-progress", "tab-history-float", "board-toggle", "keybind-float", "new-space-here", "settings-projects"];
 const LAYOUT = "my-main";
 // Herdr's version (.base) and the patched one installed (.out) of each in-place file. Hidden,
 // so writing them doesn't reload the mod.
@@ -41,11 +46,14 @@ const doc = (name) => `mods/patcher/patches/${name}.md`;
 // Whether a patch changes a copy, from its `+++ b/<path>` lines.
 const touches = (text, c) => [...text.matchAll(/^\+\+\+ b\/(\S+)/gm)].some(([, p]) => p === c.from || p.startsWith(`${c.from}/`));
 const isMod = (c) => c.from.startsWith("mods/");
+// The app screen folder a file is in (frame/settings), or undefined: Herdr's screens are checked whole.
+const screen = (c) => c.from.match(/^frame\/[^/]+(?=\/)/)?.[0];
 
 // Where Herdr's original of a copy is. An in-place file is Herdr's version until the patcher
 // installs over it (Herdr rewrites it at start): keep Herdr's as .base, and once it's been
 // replaced by the patched .out, patch .base again rather than the already patched file.
 async function original(home, c) {
+  if (c.own) return { file: `${home}/${OWN}/${c.from}` };
   const file = `${home}/${c.from}`;
   if (c.to !== c.from) return { file };
   const base = `${home}/${IN_PLACE}/${c.from}.base`;
@@ -62,8 +70,14 @@ async function apply() {
   const home = appHome();
   const root = (await exec("mktemp", ["-d"])).stdout.trim();
   const patches = PATCHES.map((name) => ({ name }));
-  const copies = COPIES.map((c) => ({ ...c, patches: [] }));
+  // Own files first: installed before the patched file that imports them.
+  const copies = [...FILES.map((f) => ({ from: f, to: f, own: true })), ...COPIES].map((c) => ({ ...c, patches: [] }));
   try {
+    // A screen's other files (its modules, icons), so the patched screen can be checked whole.
+    for (const s of new Set(copies.map(screen).filter(Boolean))) {
+      const copied = await exec("sh", ["-c", 'mkdir -p "$(dirname "$2")" && cp -R "$1" "$2"', "sh", `${home}/${s}`, `${root}/${s}`]);
+      if (copied.code !== 0) for (const c of copies) if (screen(c) === s) c.error = out(copied) || `Couldn't copy ${s}.`;
+    }
     // Herdr's originals at their own paths under root: patches name files as a/mods/worktree/main.js.
     for (const c of copies) {
       const from = await original(home, c);
@@ -99,7 +113,7 @@ async function apply() {
         c.error = out(copied) || `Couldn't install ${c.to}.`;
         break;
       }
-      if (c.to !== c.from) continue;
+      if (c.to !== c.from || c.own) continue;
       const recorded = await exec("cp", [`${root}/${c.from}`, `${home}/${IN_PLACE}/${c.from}.out`]);
       if (recorded.code !== 0) {
         c.error = out(recorded) || `Couldn't record the patched ${c.to}.`;
@@ -127,8 +141,8 @@ async function check(home, root, c) {
   if (!c.changed) return;
   if (c.from.endsWith(".json")) {
     try { JSON.parse(await readTextFile(built)); } catch (error) { c.error = `Not valid JSON: ${error}`; }
-  } else if (isMod(c)) {
-    const r = await exec("herdr-app", ["check", built], { timeout: 120_000 });
+  } else if (isMod(c) || screen(c)) {
+    const r = await exec("herdr-app", ["check", isMod(c) ? built : `${root}/${screen(c)}`], { timeout: 120_000 });
     if (r.code !== 0) c.error = out(r) || "herdr-app check failed.";
   }
 }

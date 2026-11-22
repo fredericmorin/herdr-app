@@ -1,5 +1,6 @@
 // Keeps ~/.config/herdr-app/projects.json (per-project settings read by patched mods) present,
-// with a commented reference at its top. Update REFERENCE whenever a patch adds or changes a setting.
+// with a commented reference at its top. Whenever a patch or mod adds or changes a setting, update
+// REFERENCE and the Projects section in Settings that edits the file (files/frame/settings/projects.js).
 
 import { appHome, readTextFile, writeTextFile } from "herdr";
 

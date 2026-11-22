@@ -1,20 +1,26 @@
-// Creates a Vikunja task in a bucket, or edits a task's title and description (the Vikunja board's
+// Creates a Vikunja task in a bucket, or edits a task's title and description (the issue board's
 // "+" and Edit). Props { mode: "new" | "edit", url, project, view, bucket: {id, title},
 // task: {id, identifier, title, description, labels: [{id, title}]} }. Descriptions are read and written as Markdown.
 // Model and Effort set the task's model/ and effort/ labels (Default: none), which the Board's Start
 // hands to claude-new. Those labels must already exist in Vikunja (this token can't create labels).
-// After a save, shared "vikunja.changed" gets Date.now() so the board refreshes; on an error the
+// After a save, shared "issue-board.changed" gets Date.now() so the board refreshes; on an error the
 // dialog stays open with what was typed. Enter in the title or Cmd+Enter saves, Esc cancels.
+// Props { tracker: "linear", create: { team, state?, assignee?, cycle?, project? } } (a Board's Linear chip):
+// the same dialog for a Linear issue, through Linear's MCP server (./linear.js): get_issue, then save_issue
+// with the title and description (and create's fields for a new one). No Model or Effort rows: Linear
+// issues keep no model/effort labels (they're picked in claude-new).
 import { View, div } from "gpui-kit";
 import { v_flex, h_flex, InputState, Input, TextareaState, Textarea } from "gpui-base";
 import { props, closeOverlay, theme, checking, setShared } from "herdr";
 import { mcp, MODELS, EFFORTS, SETTING, setting } from "./vikunja.js";
+import { linear } from "./linear.js";
 
 const withOwn = (list, value) => (!value || list.includes(value) ? list : [...list, value]);
 
-export default class VikunjaTask extends View {
+export default class IssueBoardEdit extends View {
   init(_props, cx) {
     const p = props() ?? {};
+    this.linear = p.tracker === "linear";
     this.edit = p.mode === "edit";
     this.taskId = p.task?.id;
     this.labels = p.task?.labels ?? [];  // the task's labels as last read: a save keeps all but model/effort
@@ -45,8 +51,8 @@ export default class VikunjaTask extends View {
     this.effortHandle = cx.focus_handle();
     // Window-level Tab moves focus across the window; our own bindings keep it in the dialog.
     cx.bind_keys([
-      { keystroke: "tab", action: "vikunja_task_next", context: "VikunjaTask" },
-      { keystroke: "shift-tab", action: "vikunja_task_prev", context: "VikunjaTask" },
+      { keystroke: "tab", action: "issue_board_edit_next", context: "IssueBoardEdit" },
+      { keystroke: "shift-tab", action: "issue_board_edit_prev", context: "IssueBoardEdit" },
     ]);
     if (this.edit && !checking()) this.readFresh(p, cx);
   }
@@ -56,8 +62,10 @@ export default class VikunjaTask extends View {
   readFresh(p, cx) {
     cx.spawn(async (cx) => {
       try {
-        const fresh = await mcp(p.url, "tasks_read", { task: p.task.id, format: "markdown",
-          fields: ["title", "description", "labels.id", "labels.title"] });
+        const fresh = this.linear ? await linear("get_issue", { id: p.task.id })
+          : await mcp(p.url, "tasks_read", { task: p.task.id, format: "markdown",
+            fields: ["title", "description", "labels.id", "labels.title"] });
+        if (this.linear) fresh.labels = [];
         const rowsUntouched = this.model === setting(this.labels, "model") && this.effort === setting(this.labels, "effort");
         this.labels = fresh.labels ?? [];
         if (rowsUntouched) {
@@ -86,7 +94,7 @@ export default class VikunjaTask extends View {
     const p = props();
     const description = this.description.value();
     const wanted = [["model", this.model], ["effort", this.effort]];
-    const relabel = wanted.some(([kind, value]) => value !== setting(this.labels, kind));
+    const relabel = !this.linear && wanted.some(([kind, value]) => value !== setting(this.labels, kind));
     this.saving = true;
     this.error = "";
     cx.notify();
@@ -103,7 +111,12 @@ export default class VikunjaTask extends View {
           if (!label) return fail(`No "${name}" label in Vikunja: create it there first.`);
           chosen.push(label);
         }
-        if (this.edit) {
+        if (this.linear) {
+          const made = await linear("save_issue", this.edit ? { id: this.taskId, title, description } : { ...p.create, title, description });
+          // From here on this dialog edits the issue it made: saving again after an error can't make a second one.
+          this.edit = true;
+          this.taskId ??= made?.id;
+        } else if (this.edit) {
           await mcp(p.url, "tasks_update", { task: this.taskId, title, description, format: "markdown" });
         } else {
           const made = await mcp(p.url, "tasks_create", { project: p.project, title, description, bucket_id: p.bucket.id, format: "markdown" });
@@ -117,11 +130,16 @@ export default class VikunjaTask extends View {
           await mcp(p.url, "do_action", { action: "task_labels_bulk_replace", arguments: { task: this.taskId, labels } });
         }
       } catch (e) {
+        if (this.linear) {
+          return fail(e.status === 0 || e.status === 401 ? "Not signed in to Linear: sign in from the Board."
+            : e.status === 429 ? "Linear is rate-limiting: try again in a few minutes."
+            : `Couldn't save: ${e.message}`);
+        }
         return fail(e.status === 0 ? "No Vikunja API token."
           : e.status === 401 || e.status === 403 ? "This token can't write tasks: give it write access to tasks in Vikunja."
           : `Couldn't save: ${e.message}`);
       }
-      setShared("vikunja.changed", Date.now());
+      setShared("issue-board.changed", Date.now());
       closeOverlay(p.overlay);
     });
   }
@@ -131,7 +149,7 @@ export default class VikunjaTask extends View {
   }
 
   cycle(step, cx) {
-    const order = ["title", "description", "model", "effort"];
+    const order = this.linear ? ["title", "description"] : ["title", "description", "model", "effort"];
     this.focusAt(order[(order.indexOf(this.at) + step + order.length) % order.length], cx);
   }
 
@@ -172,23 +190,23 @@ export default class VikunjaTask extends View {
           .text_size(12).text_color(v === current ? t.accent_foreground : t.foreground).cursor_pointer()
           .on_click((_e, cx) => { set(v); this.error = ""; this.focusAt(at, cx); }).child(v || "Default")));
     };
-    return v_flex().id("vikunja-task").track_focus(this.handle).on_key_down((e, cx) => this.key(e, cx))
-      .key_context("VikunjaTask")
-      .on_action("vikunja_task_next", (_e, cx) => this.cycle(1, cx))
-      .on_action("vikunja_task_prev", (_e, cx) => this.cycle(-1, cx))
+    return v_flex().id("issue-board-edit").track_focus(this.handle).on_key_down((e, cx) => this.key(e, cx))
+      .key_context("IssueBoardEdit")
+      .on_action("issue_board_edit_next", (_e, cx) => this.cycle(1, cx))
+      .on_action("issue_board_edit_prev", (_e, cx) => this.cycle(-1, cx))
       .w_full().p(18).bg(t.popover).text_color(t.foreground)
       .child(h_flex().items_center()
-        .child(div().flex_1().text_size(15).font_semibold().child(this.edit ? "Edit task" : "New task"))
+        .child(div().flex_1().text_size(15).font_semibold().child(`${this.edit ? "Edit" : "New"} ${this.linear ? "issue" : "task"}`))
         .child(div().text_size(11).text_color(t.dim).child("Esc")))
       .child(div().pt(6).pb(14).text_size(11.5).text_color(t.dim)
-        .child(this.edit ? `Editing ${p.task?.identifier ?? `task ${this.taskId}`}` : `New task in ${p.bucket?.title ?? "this column"}`))
+        .child(this.edit ? `Editing ${p.task?.identifier ?? `${this.linear ? "issue" : "task"} ${this.taskId}`}` : `New ${this.linear ? "issue" : "task"} in ${p.bucket?.title ?? "this column"}`))
       .child(field(Input.new(this.title).h(36), this.at === "title"))
       .child(div().h(8))
       .child(field(Textarea.new(this.description).py(8), this.at === "description"))
-      .child(div().h(10))
-      .child(v_flex().gap(4)
-        .child(choice("vt-model", this.modelHandle, "model", "Model", withOwn(MODELS, this.model), this.model, (v) => { this.model = v; }))
-        .child(choice("vt-effort", this.effortHandle, "effort", "Effort", withOwn(EFFORTS, this.effort), this.effort, (v) => { this.effort = v; })))
+      .when(!this.linear, el => el.child(div().h(10))
+        .child(v_flex().gap(4)
+          .child(choice("vt-model", this.modelHandle, "model", "Model", withOwn(MODELS, this.model), this.model, (v) => { this.model = v; }))
+          .child(choice("vt-effort", this.effortHandle, "effort", "Effort", withOwn(EFFORTS, this.effort), this.effort, (v) => { this.effort = v; }))))
       .child(div().h(16).pt(4).text_size(11).text_color(t.blocked).child(this.error))
       .child(h_flex().pt(12).gap(8).items_center()
         .child(div().flex_1().text_size(11).text_color(t.dim).child("⌘↩ to save"))

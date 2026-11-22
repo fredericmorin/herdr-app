@@ -5,7 +5,7 @@
 // Props { space, folder } (New worktree in the space menu and the + menu) target that space instead of the focused one;
 // { folder } alone (the Board, when the repo's main checkout has no space) targets that folder: a worktree of it,
 // or without one a new space there.
-// Props { message } fill in the first message (the Vikunja board's Start).
+// Props { message } fill in the first message (the issue board's Start).
 // The Plan mode checkbox starts Claude with `--permission-mode plan`; props { plan } tick or untick it.
 // Without props { plan }, New worktree and Plan mode start from projects.json's defaults for the
 // target's repo (`board_start` for a Board start, i.e. props { ref }; `new_session` otherwise), else worktree on and
@@ -17,6 +17,7 @@
 // Props { label: "k=v" } put that label on the session's terminal (the Board finds a card's session by it).
 // The branch is required for a worktree; `claude -p` suggests one from the prompt while it's
 // typed (<user>_<words_with_underscores>, user from `whoami`), until the branch is edited by hand.
+// Props { branch } fill it instead, as if typed (the Board's Linear Start: the issue's own branch name).
 // The message is multi-line: Enter adds a line, Cmd+Enter starts from anywhere in the dialog (Enter too, in the
 // branch field), Esc cancels.
 import { View, div } from "gpui-kit";
@@ -133,7 +134,12 @@ export default class ClaudeNew extends View {
       this.error = "";
       cx.notify();
     });
-    // Props { message } (the Vikunja board's Start) fill the first message and suggest a branch from it.
+    // Props { branch } (a Linear issue's own branch name, from the Board) fill the branch: no suggestion runs.
+    if (p?.branch) {
+      this.branch.set_value(p.branch);
+      this.typed = true;
+    }
+    // Props { message } (the issue board's Start) fill the first message and suggest a branch from it.
     if (p?.message) {
       this.input.set_value(p.message);
       this.promptChanged(cx);

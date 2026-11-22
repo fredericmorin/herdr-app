@@ -1,6 +1,6 @@
 {
   "new": [
-    { "if": { "shown": "board" }, "do": "vikunja-board.new" },
+    { "if": { "shown": "board" }, "do": "issue-board.new" },
     { "do": "space.new" }
   ],
   "agent-prev": [

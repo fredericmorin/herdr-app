@@ -13,7 +13,7 @@ diff -ru a/layouts/main.json b/layouts/main.json
                  }
                }
              },
-+            { "id": "board", "type": "block", "content": { "mod": "vikunja-board", "props": { "url": "https://todo.endor.one", "project": 15 } } }
++            { "id": "board", "type": "block", "content": { "mod": "issue-board", "props": { "url": "https://todo.endor.one", "project": 15 } } }
 +            ] },
              {
                "id": "panel",
@@ -117,7 +117,7 @@ diff -ru a/mods/tabs/main.js b/mods/tabs/main.js
            else { run("layout.select", { stack: "panel-body", child: id }); run("layout.show", { id: "panel" }); }
          }).child(svg(icon).size(14)).child(label);
      };
-+    // Terminals / Board: the layout's `center` stack shows the tab or the Vikunja board (mods/vikunja-board).
++    // Terminals / Board: the layout's `center` stack shows the tab or the issue board (mods/issue-board).
 +    const center = find(root, "center");
 +    const shows = center?.active ?? "main";
 +    // Going to another space, tab or pane while the Board stays up (keys, palette, toasts) shows the terminals again.
@@ -132,7 +132,7 @@ diff -ru a/mods/tabs/main.js b/mods/tabs/main.js
 +      .child(svg(icon).size(13)).child(label);
 +    const toggle = h_flex().flex_none().p(2).gap(2).rounded(7).border_1().border_color(t.border)
 +      .child(seg("main", "Terminals", "mods/workspace-chrome/terminal.svg"))
-+      .child(seg("board", "Board", "mods/vikunja-board/board.svg"));
++      .child(seg("board", "Board", "mods/issue-board/board.svg"));
      return h_flex().size_full().min_w(0).px(10).pl(lightsPadding).gap(3).items_center().bg(t.chrome).border_b(1).border_color(t.border)
        .on_mouse_up("left", () => { this.pressed = null; })
        .on_scroll_wheel(e => this.wheel(e))

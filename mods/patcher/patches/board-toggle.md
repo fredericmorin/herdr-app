@@ -1,7 +1,7 @@
 # board-toggle
 
 The tab bar gets a **Terminals / Board** toggle at its left, and the work area can show the
-Vikunja board (`mods/vikunja-board`) in place of the shown tab's panes. Going to a space, tab
+issue board (`mods/issue-board`: Vikunja and Linear chips) in place of the shown tab's panes. Going to a space, tab
 or agent while the Board is up shows the terminals again.
 
 Made on top of: `use-patched-copies` (it touches no line of the base; it needs the base's
@@ -11,10 +11,10 @@ Made on top of: `use-patched-copies` (it touches no line of the base; it needs t
 
 - `my-main` layout: the `main` block (the active tab) is wrapped in a stack
   `{ "id": "center", "type": "stack", "active": "main" }` whose second child is
-  `{ "id": "board", "content": { "mod": "vikunja-board", "props": { "url": "https://todo.endor.one", "project": 15 } } }`.
+  `{ "id": "board", "content": { "mod": "issue-board", "props": { "url": "https://todo.endor.one", "project": 15 } } }`.
   Lines are only inserted (no re-indent), so the hunks stay small.
 - `my-tabs`, `render()`: before the tab strip, a segmented toggle (Terminals
-  `mods/workspace-chrome/terminal.svg`, Board `mods/vikunja-board/board.svg`) runs
+  `mods/workspace-chrome/terminal.svg`, Board `mods/issue-board/board.svg`) runs
   `layout.select {stack: "center", child: "main" | "board"}`. The highlight follows
   `find(root, "center").active`. Drawn only when the layout has a `center` node, followed by a
   thin divider.
@@ -26,7 +26,7 @@ Made on top of: `use-patched-copies` (it touches no line of the base; it needs t
 - `my-spaces` and `my-agents`: a `showTerminals()` helper, called by every space and agent click,
   so clicking the space or agent that's already selected (no focus change, so no watch) also
   switches back.
-- Depends on `mods/vikunja-board` (the board and its icon).
+- Depends on `mods/issue-board` (the board and its icon).
 
 ## What it expects from Herdr's original
 
@@ -53,7 +53,7 @@ Made on top of: `use-patched-copies` (it touches no line of the base; it needs t
 ## How to check it works
 
 1. The tab bar shows `Terminals | Board` at its left; Terminals is highlighted.
-2. Click Board: the work area shows the Vikunja board; Board is highlighted.
+2. Click Board: the work area shows the issue board; Board is highlighted.
 3. Click a tab: the terminals come back.
 4. On the Board, ctrl-2 (another space), cmd-] (next agent), ctrl-tab: the terminals come back.
 5. On the Board, click the shown space, then the focused agent: the terminals come back.

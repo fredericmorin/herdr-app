@@ -1,6 +1,6 @@
 // Keybind: keys whose action depends on what the window shows. `keybind.<name>` in keys.json runs
 // the first rule of <name> in ./binds.json whose `if` holds:
-//   { "new": [ { "if": { "shown": "board" }, "do": "vikunja-board.new" }, { "do": "space.new" } ] }
+//   { "new": [ { "if": { "shown": "board" }, "do": "issue-board.new" }, { "do": "space.new" } ] }
 // `if.shown`: a layout node id that's on screen (not hidden, and the active child of every stack
 // above it). No `if`: always. `do`: a keys.json-style action, "name", "name:value" (the value
 // fills the command's first argument) or { "command", "args" }; "<mod>.<command>" works too; a list

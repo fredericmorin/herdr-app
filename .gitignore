@@ -16,8 +16,8 @@
 !/mods/vscode/
 !/mods/git-graph/
 !/mods/tab-history/
-!/mods/vikunja-board/
-!/mods/vikunja-task/
+!/mods/issue-board/
+!/mods/issue-board-edit/
 !/mods/keybind/
 mods/**/gpui-kit.d.ts
 mods/**/jsconfig.json

@@ -3,7 +3,7 @@
 Keeps the `keybind` mod running in `my-main`, so a `keybind.<name>` key in `keys.json` runs the
 first rule of `<name>` in `mods/keybind/binds.json` that fits what the window shows, whatever
 has the keyboard. For example `cmd-n` (`keybind.new`, in `layout:my-main`) opens a new To-Do
-ticket while the Vikunja board shows, and makes a new space otherwise.
+ticket while the issue board shows, and makes a new space otherwise.
 
 Made on top of: `use-patched-copies` (only for consistency: it touches no line of the base).
 
@@ -16,7 +16,7 @@ Made on top of: `use-patched-copies` (only for consistency: it touches no line o
 - Depends on `mods/keybind` (rules in its `binds.json`; `if.shown` checks a layout node is on
   screen through `layout()`, `do` runs a command, `<mod>.<command>` included) and on the
   `keybind.*` bindings in `keys.json`. The shipped `cmd-n` rule also uses `board-toggle`'s
-  `board` node and `mods/vikunja-board`'s `new` command.
+  `board` node and `mods/issue-board`'s `new` command.
 
 ## What it expects from Herdr's original
 

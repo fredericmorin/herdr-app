@@ -7,6 +7,8 @@
 // or without one a new space there.
 // Props { message } fill in the first message (the Vikunja board's Start).
 // The Plan mode checkbox starts Claude with `--permission-mode plan`; props { plan: true } tick it.
+// The Model and Effort rows add `--model` / `--effort`; Default adds neither. Props { model, effort } pick them
+// (the Board: the ticket's model/ and effort/ labels); a value not in the lists gets a chip of its own.
 // Props { started, ref }: on Start (not Cancel), shared state `started` gets { plan, at, ref } so the opener can react;
 // with ref (the Board) and Plan mode ticked, the message also asks Claude to ask clarifying questions first.
 // The branch is required for a worktree; `claude -p` suggests one from the prompt while it's
@@ -26,6 +28,11 @@ const NAMING = "Name a git branch after the deliverable this task asks for: what
   "Example: \"create new mod but investigate first\" -> create_new_mod. " +
   "Reply with only the name: 2 to 5 lowercase words joined by underscores, at most 40 characters, no prefix, no quotes.";
 
+// `claude --model` aliases and `--effort` levels; "" (Default) passes no flag.
+const MODELS = ["fable", "opus", "sonnet", "haiku"];
+const EFFORTS = ["low", "medium", "high", "xhigh", "max"];
+const withOwn = (list, value) => (!value || list.includes(value) ? list : [...list, value]);
+
 // Added to a Board start's message when Plan mode is ticked.
 const PLAN_ASK = "Before doing this, ask important clarifying questions to understand my goals.";
 
@@ -42,6 +49,10 @@ export default class ClaudeNew extends View {
     this.target = p?.space || p?.folder ? { space: p.space, cwd: p.folder } : focused();
     this.worktree = true;
     this.plan = p?.plan === true;
+    this.model = typeof p?.model === "string" ? p.model : "";
+    this.effort = typeof p?.effort === "string" ? p.effort : "";
+    this.models = withOwn(MODELS, this.model);
+    this.efforts = withOwn(EFFORTS, this.effort);
     this.seq = 0;        // bumped on every prompt change: only the newest naming counts
     this.naming = false; // a claude -p call for the newest prompt is under way
     this.auto = "";      // the branch last filled in from the prompt
@@ -53,7 +64,7 @@ export default class ClaudeNew extends View {
     });
     this.input = TextareaState.new({ placeholder: "First message (optional)", rows: 4 });
     this.input.set_auto_grow(4, 14);
-    this.at = "message"; // what has the keyboard, for Tab: "message", "toggle", "plan" or "branch"
+    this.at = "message"; // what has the keyboard, for Tab: "message", "toggle", "plan", "model", "effort" or "branch"
     this.input.on("focus", (_e, cx) => { this.at = "message"; cx.notify(); });
     this.input.on("change", (_e, cx) => this.promptChanged(cx));
     // The textarea's submit is Enter (a new line) or Cmd+Enter (secondary): only the latter starts.
@@ -79,6 +90,8 @@ export default class ClaudeNew extends View {
     this.handle = cx.focus_handle();
     this.toggleHandle = cx.focus_handle();
     this.planHandle = cx.focus_handle();
+    this.modelHandle = cx.focus_handle();
+    this.effortHandle = cx.focus_handle();
     // The window binds Tab to move focus across the whole window, before any on_key_down
     // sees it: bindings of our own, deeper in, come first and keep Tab in the dialog.
     cx.bind_keys([
@@ -140,7 +153,9 @@ export default class ClaudeNew extends View {
     // A Board start in Plan mode asks before planning.
     if (p.ref && this.plan) prompt = `${prompt}\n\n${PLAN_ASK}`.trim();
     // `--` keeps a prompt that starts with "-" from being read as an option, so options go before it.
-    const argv = ["claude", ...(this.plan ? ["--permission-mode", "plan"] : []), ...(prompt ? ["--", prompt] : [])];
+    const argv = ["claude", ...(this.plan ? ["--permission-mode", "plan"] : []),
+      ...(this.model ? ["--model", this.model] : []), ...(this.effort ? ["--effort", this.effort] : []),
+      ...(prompt ? ["--", prompt] : [])];
     if (!this.worktree) {
       if (!this.target?.space && this.target?.cwd) run("space.new", { folder: this.target.cwd, argv });
       else run("tab.new", { space: this.target?.space, folder: this.target?.cwd, argv });
@@ -155,7 +170,7 @@ export default class ClaudeNew extends View {
   }
 
   cycle(step, cx) {
-    const order = this.worktree ? ["message", "toggle", "plan", "branch"] : ["message", "toggle", "plan"];
+    const order = ["message", "toggle", "plan", "model", "effort", ...(this.worktree ? ["branch"] : [])];
     this.focusAt(order[(order.indexOf(this.at) + step + order.length) % order.length], cx);
   }
 
@@ -164,6 +179,8 @@ export default class ClaudeNew extends View {
     if (at === "message") this.input.focus();
     else if (at === "branch") this.branch.focus();
     else if (at === "plan") this.planHandle.focus();
+    else if (at === "model") this.modelHandle.focus();
+    else if (at === "effort") this.effortHandle.focus();
     else this.toggleHandle.focus();
     cx.notify();
   }
@@ -199,6 +216,27 @@ export default class ClaudeNew extends View {
     const toggles = h_flex().gap(12)
       .child(checkbox("cn-worktree", this.toggleHandle, "toggle", this.worktree, "New worktree", (_e, cx) => this.toggleWorktree(cx)))
       .child(checkbox("cn-plan", this.planHandle, "plan", this.plan, "Plan mode", (_e, cx) => this.togglePlan(cx)));
+    // Chips with Default ("") first. Focusable so Tab reaches the row; ←/→ move the choice there.
+    const choice = (id, handle, at, label, values, current, set) => {
+      const all = ["", ...values];
+      return h_flex().id(id).track_focus(handle).gap(4).items_center().px(4).py(2).rounded(6)
+        .border_1().border_color(this.at === at ? t.accent : t.popover)
+        .on_key_down((e, cx) => {
+          const step = e.key === "right" ? 1 : e.key === "left" ? -1 : 0;
+          if (!step) return;
+          set(all[(all.indexOf(current) + step + all.length) % all.length]);
+          cx.stop_propagation();
+          cx.notify();
+        })
+        .child(div().w(48).text_size(12.5).text_color(t.muted).child(label))
+        .children(all.map((v) => h_flex().id(`${id}-${v || "default"}`).h(24).px(9).items_center().rounded(6)
+          .border_1().border_color(v === current ? t.accent : t.input).bg(v === current ? t.accent : t.background)
+          .text_size(12).text_color(v === current ? t.accent_foreground : t.foreground).cursor_pointer()
+          .on_click((_e, cx) => { set(v); this.focusAt(at, cx); }).child(v || "Default")));
+    };
+    const settings = v_flex().gap(4)
+      .child(choice("cn-model", this.modelHandle, "model", "Model", this.models, this.model, (v) => { this.model = v; }))
+      .child(choice("cn-effort", this.effortHandle, "effort", "Effort", this.efforts, this.effort, (v) => { this.effort = v; }));
     const note = this.error ? [this.error, t.blocked]
       : this.naming ? ["Naming the branch from the message…", t.dim]
       : null;
@@ -217,6 +255,8 @@ export default class ClaudeNew extends View {
       .child(field(Textarea.new(this.input).py(8), t.accent))
       .child(div().h(12))
       .child(toggles)
+      .child(div().h(8))
+      .child(settings)
       .when(this.worktree, (el) => el.child(div().h(8)).child(field(Input.new(this.branch).h(36), this.error ? t.blocked : t.input))
         .child(div().h(16).pt(4).text_size(11).text_color(note?.[1] ?? t.dim).child(note?.[0] ?? "")))
       .child(h_flex().pt(16).gap(8).justify_end()

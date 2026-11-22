@@ -4,13 +4,14 @@
 // the card to Plan (Plan mode ticked) or Doing and switches the `center` stack back to the terminals.
 // The message ends with a "Vikunja ticket:" line (task, project, view ids): the session's vikunja-ticket
 // skill (~/.claude/skills) moves the card on from there, through the vikunja MCP server.
+// The card's model/ and effort/ labels pick claude-new's Model and Effort (Default without them).
 // "+" in a column and Edit on a card open vikunja-task, which saves and pings the board to refresh.
 // Props { url, project }: the Vikunja instance and the parent project. Talks to Vikunja's own MCP
 // server (<url>/api/v2/mcp) through ./vikunja.js.
 import { View, div, svg } from "gpui-kit";
 import { v_flex, h_flex } from "gpui-base";
 import { props, theme, exec, openOverlay, appHome, checking, shared, layout, run, spaces, panes } from "herdr";
-import { mcp } from "./vikunja.js";
+import { mcp, setting, SETTING } from "./vikunja.js";
 
 const REFRESH = 60_000;
 // claude-new writes { plan, at, ref } here when Start is confirmed; the board then moves ref.task.
@@ -182,7 +183,8 @@ export default class VikunjaBoard extends View {
         fresh = await this.mcp("tasks_read", { task: task.id, format: "markdown",
           fields: ["id", "identifier", "index", "title", "description", "labels.title"] });
       } catch {}  // the card's copy is at most a minute old: good enough to start from
-      const labels = (fresh.labels ?? []).map(l => l.title).filter(Boolean);
+      // model/ and effort/ labels become claude-new's flags, not part of the message.
+      const labels = (fresh.labels ?? []).map(l => l.title).filter(t => t && !SETTING.test(t));
       const lines = [`Vikunja task ${fresh.identifier || `#${fresh.index}`}: ${fresh.title}`, "",
         (fresh.description ?? "").trim(), "",
         ...(labels.length ? [`Labels: ${labels.join(", ")}`] : []), `${this.url}/tasks/${task.id}`, "",
@@ -192,6 +194,7 @@ export default class VikunjaBoard extends View {
       const message = lines.filter((l, i) => l !== "" || (i > 0 && lines[i - 1] !== "")).join("\n").trim();
       openOverlay({ mod: "claude-new", kind: "dialog", width: 560, props: {
         ...(target ?? {}), message, plan: !named(bucket, "plan"), started: STARTED,
+        model: setting(fresh.labels, "model"), effort: setting(fresh.labels, "effort"),
         ref: { task: task.id, project: project?.id, view: project?.view } } });
     });
   }
@@ -221,7 +224,8 @@ export default class VikunjaBoard extends View {
     openOverlay({ mod: "vikunja-task", kind: "dialog", width: 520, props: {
       mode, url: this.url, project: project.id, view: project.view,
       bucket: { id: bucket.id, title: bucket.title },
-      task: task ? { id: task.id, identifier: task.identifier || `#${task.index}`, title: task.title, description: task.description ?? "" } : null } });
+      task: task ? { id: task.id, identifier: task.identifier || `#${task.index}`, title: task.title, description: task.description ?? "",
+        labels: (task.labels ?? []).map(l => ({ id: l.id, title: l.title })) } : null } });
   }
 
   render(cx) {

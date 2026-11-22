@@ -2,6 +2,17 @@
 // The token is in ~/.config/herdr-app/.vikunja-token (git-ignored).
 import { exec, readTextFile, appHome } from "herdr";
 
+// A task's model and effort for Claude are labels ("model/opus", "effort/high"); none is Default (no flag).
+export const MODELS = ["fable", "opus", "sonnet", "haiku"];
+export const EFFORTS = ["low", "medium", "high", "xhigh", "max"];
+export const SETTING = /^(model|effort)\//;
+
+// What labels set for kind ("model" or "effort"): the rest of the first "<kind>/..." title, "" for Default.
+export function setting(labels, kind) {
+  const title = (labels ?? []).map(l => l.title ?? "").find(t => t.startsWith(`${kind}/`));
+  return title ? title.slice(kind.length + 1) : "";
+}
+
 // status: the HTTP status a tool reported ("404 Not Found: ..."), 0 without a token, -1 otherwise.
 export class McpError extends Error {
   constructor(status, message) { super(message); this.status = status; }

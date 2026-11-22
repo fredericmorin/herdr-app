@@ -1,17 +1,25 @@
 // Creates a Vikunja task in a bucket, or edits a task's title and description (the Vikunja board's
 // "+" and Edit). Props { mode: "new" | "edit", url, project, view, bucket: {id, title},
-// task: {id, identifier, title, description} }. Descriptions are read and written as Markdown.
+// task: {id, identifier, title, description, labels: [{id, title}]} }. Descriptions are read and written as Markdown.
+// Model and Effort set the task's model/ and effort/ labels (Default: none), which the Board's Start
+// hands to claude-new. Those labels must already exist in Vikunja (this token can't create labels).
 // After a save, shared "vikunja.changed" gets Date.now() so the board refreshes; on an error the
 // dialog stays open with what was typed. Enter in the title or Cmd+Enter saves, Esc cancels.
 import { View, div } from "gpui-kit";
 import { v_flex, h_flex, InputState, Input, TextareaState, Textarea } from "gpui-base";
 import { props, closeOverlay, theme, checking, setShared } from "herdr";
-import { mcp } from "./vikunja.js";
+import { mcp, MODELS, EFFORTS, SETTING, setting } from "./vikunja.js";
+
+const withOwn = (list, value) => (!value || list.includes(value) ? list : [...list, value]);
 
 export default class VikunjaTask extends View {
   init(_props, cx) {
     const p = props() ?? {};
     this.edit = p.mode === "edit";
+    this.taskId = p.task?.id;
+    this.labels = p.task?.labels ?? [];  // the task's labels as last read: a save keeps all but model/effort
+    this.model = setting(this.labels, "model");
+    this.effort = setting(this.labels, "effort");
     this.error = "";
     this.saving = false;
     this.title = InputState.new({ placeholder: "Title" });
@@ -21,7 +29,7 @@ export default class VikunjaTask extends View {
       this.title.set_value(p.task?.title ?? "");
       this.description.set_value(p.task?.description ?? "");
     }
-    this.at = "title";  // what has the keyboard, for Tab
+    this.at = "title";  // what has the keyboard, for Tab: "title", "description", "model" or "effort"
     this.title.on("focus", (_e, cx) => { this.at = "title"; cx.notify(); });
     this.description.on("focus", (_e, cx) => { this.at = "description"; cx.notify(); });
     const changed = (_e, cx) => { this.error = ""; cx.notify(); };
@@ -33,24 +41,34 @@ export default class VikunjaTask extends View {
     this.title.focus();
     cx.timer.after(600, () => { if (this.at === "title") this.title.focus(); });
     this.handle = cx.focus_handle();
+    this.modelHandle = cx.focus_handle();
+    this.effortHandle = cx.focus_handle();
     // Window-level Tab moves focus across the window; our own bindings keep it in the dialog.
     cx.bind_keys([
       { keystroke: "tab", action: "vikunja_task_next", context: "VikunjaTask" },
-      { keystroke: "shift-tab", action: "vikunja_task_next", context: "VikunjaTask" },
+      { keystroke: "shift-tab", action: "vikunja_task_prev", context: "VikunjaTask" },
     ]);
     if (this.edit && !checking()) this.readFresh(p, cx);
   }
 
   // The card's copy can be a minute old: read the task again, but only replace fields that still
-  // hold the card's copy. Compares the text itself, so it doesn't depend on when change events fire.
+  // hold the card's copy. Compares the values themselves, so it doesn't depend on when change events fire.
   readFresh(p, cx) {
     cx.spawn(async (cx) => {
       try {
-        const fresh = await mcp(p.url, "tasks_read", { task: p.task.id, format: "markdown", fields: ["title", "description"] });
+        const fresh = await mcp(p.url, "tasks_read", { task: p.task.id, format: "markdown",
+          fields: ["title", "description", "labels.id", "labels.title"] });
+        const rowsUntouched = this.model === setting(this.labels, "model") && this.effort === setting(this.labels, "effort");
+        this.labels = fresh.labels ?? [];
+        if (rowsUntouched) {
+          this.model = setting(this.labels, "model");
+          this.effort = setting(this.labels, "effort");
+        }
         const untouched = this.title.value() === (p.task.title ?? "") && this.description.value() === (p.task.description ?? "");
-        if (!untouched) return;
-        this.title.set_value(fresh.title ?? "");
-        this.description.set_value(fresh.description ?? "");
+        if (untouched) {
+          this.title.set_value(fresh.title ?? "");
+          this.description.set_value(fresh.description ?? "");
+        }
         cx.notify();
       } catch {}  // keep the card's copy
     });
@@ -67,22 +85,41 @@ export default class VikunjaTask extends View {
     }
     const p = props();
     const description = this.description.value();
-    const [tool, args] = this.edit
-      ? ["tasks_update", { task: p.task.id, title, description, format: "markdown" }]
-      : ["tasks_create", { project: p.project, title, description, bucket_id: p.bucket.id, format: "markdown" }];
+    const wanted = [["model", this.model], ["effort", this.effort]];
+    const relabel = wanted.some(([kind, value]) => value !== setting(this.labels, kind));
     this.saving = true;
     this.error = "";
     cx.notify();
     cx.spawn(async (cx) => {
+      const fail = (message) => { this.saving = false; this.error = message; cx.notify(); };
       try {
-        await mcp(p.url, tool, args);
+        // Labels are looked up first: a missing one stops the save before anything is written.
+        const chosen = [];
+        for (const [kind, value] of relabel ? wanted : []) {
+          if (!value) continue;
+          const name = `${kind}/${value}`;
+          const found = await mcp(p.url, "labels_list", { q: name, fields: ["id", "title"] });
+          const label = (found.items ?? []).find(l => l.title === name);
+          if (!label) return fail(`No "${name}" label in Vikunja: create it there first.`);
+          chosen.push(label);
+        }
+        if (this.edit) {
+          await mcp(p.url, "tasks_update", { task: this.taskId, title, description, format: "markdown" });
+        } else {
+          const made = await mcp(p.url, "tasks_create", { project: p.project, title, description, bucket_id: p.bucket.id, format: "markdown" });
+          // From here on this dialog edits the task it made: saving again after an error can't make a second one.
+          this.edit = true;
+          this.taskId = made.id;
+          this.labels = [];
+        }
+        if (relabel) {
+          const labels = [...this.labels.filter(l => !SETTING.test(l.title ?? "")), ...chosen].map(l => ({ id: l.id, title: l.title }));
+          await mcp(p.url, "do_action", { action: "task_labels_bulk_replace", arguments: { task: this.taskId, labels } });
+        }
       } catch (e) {
-        this.saving = false;
-        this.error = e.status === 0 ? "No Vikunja API token."
+        return fail(e.status === 0 ? "No Vikunja API token."
           : e.status === 401 || e.status === 403 ? "This token can't write tasks: give it write access to tasks in Vikunja."
-          : `Couldn't save: ${e.message}`;
-        cx.notify();
-        return;
+          : `Couldn't save: ${e.message}`);
       }
       setShared("vikunja.changed", Date.now());
       closeOverlay(p.overlay);
@@ -93,9 +130,17 @@ export default class VikunjaTask extends View {
     if (e.key === "escape") { closeOverlay(props().overlay); cx.stop_propagation(); }
   }
 
-  swapFocus(cx) {
-    if (this.at === "title") { this.at = "description"; this.description.focus(); }
-    else { this.at = "title"; this.title.focus(); }
+  cycle(step, cx) {
+    const order = ["title", "description", "model", "effort"];
+    this.focusAt(order[(order.indexOf(this.at) + step + order.length) % order.length], cx);
+  }
+
+  focusAt(at, cx) {
+    this.at = at;
+    if (at === "title") this.title.focus();
+    else if (at === "description") this.description.focus();
+    else if (at === "model") this.modelHandle.focus();
+    else this.effortHandle.focus();
     cx.notify();
   }
 
@@ -108,18 +153,42 @@ export default class VikunjaTask extends View {
       .hover(s => s.opacity(0.88)).on_click(action).child(text);
     const field = (el, on) => el.px(10).rounded(9).border_1().border_color(on ? t.accent : t.input)
       .bg(t.background).text_size(12.8).text_color(t.foreground);
+    // Chips with Default ("") first. Focusable so Tab reaches the row; ←/→ move the choice there.
+    const choice = (id, handle, at, label, values, current, set) => {
+      const all = ["", ...values];
+      return h_flex().id(id).track_focus(handle).gap(4).items_center().px(4).py(2).rounded(6)
+        .border_1().border_color(this.at === at ? t.accent : t.popover)
+        .on_key_down((e, cx) => {
+          const step = e.key === "right" ? 1 : e.key === "left" ? -1 : 0;
+          if (!step) return;
+          set(all[(all.indexOf(current) + step + all.length) % all.length]);
+          this.error = "";
+          cx.stop_propagation();
+          cx.notify();
+        })
+        .child(div().w(48).text_size(12.5).text_color(t.muted).child(label))
+        .children(all.map((v) => h_flex().id(`${id}-${v || "default"}`).h(24).px(9).items_center().rounded(6)
+          .border_1().border_color(v === current ? t.accent : t.input).bg(v === current ? t.accent : t.background)
+          .text_size(12).text_color(v === current ? t.accent_foreground : t.foreground).cursor_pointer()
+          .on_click((_e, cx) => { set(v); this.error = ""; this.focusAt(at, cx); }).child(v || "Default")));
+    };
     return v_flex().id("vikunja-task").track_focus(this.handle).on_key_down((e, cx) => this.key(e, cx))
       .key_context("VikunjaTask")
-      .on_action("vikunja_task_next", (_e, cx) => this.swapFocus(cx))
+      .on_action("vikunja_task_next", (_e, cx) => this.cycle(1, cx))
+      .on_action("vikunja_task_prev", (_e, cx) => this.cycle(-1, cx))
       .w_full().p(18).bg(t.popover).text_color(t.foreground)
       .child(h_flex().items_center()
         .child(div().flex_1().text_size(15).font_semibold().child(this.edit ? "Edit task" : "New task"))
         .child(div().text_size(11).text_color(t.dim).child("Esc")))
       .child(div().pt(6).pb(14).text_size(11.5).text_color(t.dim)
-        .child(this.edit ? `Editing ${p.task?.identifier ?? `task ${p.task?.id}`}` : `New task in ${p.bucket?.title ?? "this column"}`))
+        .child(this.edit ? `Editing ${p.task?.identifier ?? `task ${this.taskId}`}` : `New task in ${p.bucket?.title ?? "this column"}`))
       .child(field(Input.new(this.title).h(36), this.at === "title"))
       .child(div().h(8))
       .child(field(Textarea.new(this.description).py(8), this.at === "description"))
+      .child(div().h(10))
+      .child(v_flex().gap(4)
+        .child(choice("vt-model", this.modelHandle, "model", "Model", withOwn(MODELS, this.model), this.model, (v) => { this.model = v; }))
+        .child(choice("vt-effort", this.effortHandle, "effort", "Effort", withOwn(EFFORTS, this.effort), this.effort, (v) => { this.effort = v; })))
       .child(div().h(16).pt(4).text_size(11).text_color(t.blocked).child(this.error))
       .child(h_flex().pt(12).gap(8).items_center()
         .child(div().flex_1().text_size(11).text_color(t.dim).child("⌘↩ to save"))

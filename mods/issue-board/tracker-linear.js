@@ -6,8 +6,9 @@
 // loads, each open state type is one list_issues call capped at LIMIT (a full one marks its columns
 // capped: "50+" and a "More in Linear" row), and all of a refresh's calls share one helper run.
 // Columns are the workflow states of the teams involved, merged by name, in Linear's type order.
+import { appHome } from "herdr";
 import { linear, linearBatch, linearLogin, LinearError } from "./linear.js";
-import { targetOf } from "./target.js";
+import { targetOf, ticketMessage } from "./target.js";
 
 // The terminal label Start puts on an issue's session: its identifier (ENG-123).
 const ISSUE = "linear.issue";
@@ -28,18 +29,19 @@ function slugOf(kind, url) {
   return m ? { id: m[2].toLowerCase(), words: (m[1] ?? "").replace(/-/g, " ") } : null;
 }
 
-// A repo's board from its projects.json value, or why it isn't one.
-function chipOf(entry, repo) {
-  if (!entry || typeof entry !== "object" || Array.isArray(entry)) return "linear must be an object: { \"team\": \"API\", \"mine\": true }";
+// A repo's board from its projects.json value. Throws why it isn't one.
+function parse(entry, repo) {
+  const bad = (why) => { throw new Error(why); };
+  if (!entry || typeof entry !== "object" || Array.isArray(entry)) bad("linear must be an object: { \"team\": \"API\", \"mine\": true }");
   const kinds = KINDS.filter(k => entry?.[k] !== undefined && entry[k] !== false);
-  if (kinds.length !== 1) return "give exactly one of mine, cycle, project, view";
+  if (kinds.length !== 1) bad("give exactly one of mine, cycle, project, view");
   const kind = kinds[0];
   const team = entry.team ?? null;
-  if ((kind === "mine" || kind === "cycle") && entry[kind] !== true) return `${kind} must be true`;
-  if (kind === "cycle" && !team) return "cycle needs team";
-  if (team !== null && typeof team !== "string") return "team must be a team key or name";
+  if ((kind === "mine" || kind === "cycle") && entry[kind] !== true) bad(`${kind} must be true`);
+  if (kind === "cycle" && !team) bad("cycle needs team");
+  if (team !== null && typeof team !== "string") bad("team must be a team key or name");
   const slug = kind === "project" || kind === "view" ? slugOf(kind, entry[kind]) : null;
-  if ((kind === "project" || kind === "view") && !slug) return `${kind} must be a linear.app ${kind} URL`;
+  if ((kind === "project" || kind === "view") && !slug) bad(`${kind} must be a linear.app ${kind} URL`);
   const title = typeof entry.title === "string" && entry.title.trim() ? entry.title.trim()
     : kind === "mine" ? (team ? `${team} · mine` : "My issues")
     : kind === "cycle" ? `${team} · cycle`
@@ -83,23 +85,23 @@ export function linearTracker() {
     return teams.flatMap(t => statuses.get(t) ?? []);
   }
 
-  // list_issues' scope arguments for a chip. Projects and views go by their URL (list_issues takes a
+  // list_issues' scope arguments for a board. Projects and views go by their URL (list_issues takes a
   // project's slug and a view's URL); a cycle board asks for its team's current cycle once an hour.
-  async function scope(chip) {
-    if (chip.kind === "mine") return { assignee: "me", ...(chip.team ? { team: chip.team } : {}) };
-    if (chip.kind === "project") return { project: chip.slug };
-    if (chip.kind === "view") return { customView: chip.link };
-    const known = cycles.get(chip.team);
+  async function scope(board) {
+    if (board.kind === "mine") return { assignee: "me", ...(board.team ? { team: board.team } : {}) };
+    if (board.kind === "project") return { project: board.slug };
+    if (board.kind === "view") return { customView: board.link };
+    const known = cycles.get(board.team);
     if (!known || known.at + CYCLE_TTL < Date.now()) {
-      const current = page(await linear("list_cycles", { teamId: chip.team, type: "current" })).items[0];
-      cycles.set(chip.team, { id: current?.id ?? null, at: Date.now() });
+      const current = page(await linear("list_cycles", { teamId: board.team, type: "current" })).items[0];
+      cycles.set(board.team, { id: current?.id ?? null, at: Date.now() });
     }
-    const id = cycles.get(chip.team).id;
-    if (!id) throw new Error(`${chip.team} has no active cycle.`);
-    return { team: chip.team, cycle: id };
+    const id = cycles.get(board.team).id;
+    if (!id) throw new Error(`${board.team} has no active cycle.`);
+    return { team: board.team, cycle: id };
   }
 
-  const card = (chip, m) => {
+  const card = (board, m) => {
     // Linear's MCP calls the identifier (END-4) id, and the id uuid.
     const ref = m.id;
     const type = m.statusType ?? null;
@@ -117,7 +119,7 @@ export function linearTracker() {
       urgency: priority === 1 ? 2 : priority === 2 ? 1 : 0,
       labels: (m.labels ?? []).map(l => ({ title: nameOf(l), color: l?.color ?? "#888888" })).filter(l => l.title),
       // Whose it is, where a board shows more than yours.
-      who: chip.kind === "mine" ? null : nameOf(m.assignee),
+      who: board.kind === "mine" ? null : nameOf(m.assignee),
       url: m.url,
       label: `${ISSUE}=${ref}`,
       // The team as list_issue_statuses takes it: its id, else the identifier's key (ENG).
@@ -140,36 +142,52 @@ export function linearTracker() {
   return {
     name: "linear",
     title: "Linear",
+    noun: "issue",
     labelKey: ISSUE,
+    // The board's "no board for this repo" hint.
+    hint: "one Linear scope: \"mine\": true (with or without a team), \"cycle\": true with a team, or a \"project\" or \"view\" URL:",
+    example: `{ "linear": { "team": "ENG", "mine": true } }`,
+    setup: {
+      title: "Not signed in to Linear",
+      text: "The Board reads Linear through Linear's MCP server. Sign in once in the browser; the token stays in:",
+      file: `${appHome()}/.linear-mcp.json`,
+      signIn: "Sign in to Linear",
+    },
+    // No Model or Effort rows in the edit dialog: they're picked in claude-new.
+    settings: null,
 
-    chipOf,
+    parse,
 
-    async load(chip) {
-      const args = await scope(chip);
+    titleOf(board) {
+      return board.title;
+    },
+
+    async load(board) {
+      const args = await scope(board);
       const types = [...OPEN, "completed"];
       const got = await linearBatch([
         ...types.map(state => ({ tool: "list_issues", args: { ...args, state, limit: LIMIT, orderBy: "updatedAt", fields: FIELDS } })),
         // The board's own team's states, even with no issues in some of them.
-        ...(chip.team && !statuses.has(chip.team) ? [{ tool: "list_issue_statuses", args: { team: chip.team } }] : []),
+        ...(board.team && !statuses.has(board.team) ? [{ tool: "list_issue_statuses", args: { team: board.team } }] : []),
       ]);
       if (got.length > types.length) {
-        statuses.set(chip.team, ordered(value(got[types.length])));
+        statuses.set(board.team, ordered(value(got[types.length])));
       }
       const cards = [];
       const capped = new Set();
       types.forEach((type, i) => {
         const { items, more } = page(value(got[i]));
         if (more) capped.add(type);
-        for (const m of items) cards.push(card(chip, m));
+        for (const m of items) cards.push(card(board, m));
       });
       const unique = [...new Map(cards.map(c => [c.id, c])).values()];
-      const states = await statesOf([chip.team, ...unique.map(c => c.team)]);
+      const states = await statesOf([board.team, ...unique.map(c => c.team)]);
       // One column per state name, in type order, then position; issues in hidden types (canceled) drop out.
       const columns = new Map();
       for (const s of [...states].sort((a, b) => (RANK[a.type] ?? 9) - (RANK[b.type] ?? 9) || a.position - b.position)) {
         if (RANK[s.type] === undefined || columns.has(lower(s.name))) continue;
         columns.set(lower(s.name), { id: lower(s.name), title: s.name, type: s.type, limit: 0, capped: capped.has(s.type),
-          done: s.type === "completed", add: Boolean(chip.team) && s.type !== "started" && s.type !== "completed",
+          done: s.type === "completed", add: Boolean(board.team) && s.type !== "started" && s.type !== "completed",
           todo: false, cards: [] });
       }
       for (const c of unique) columns.get(lower(c.state))?.cards.push(c);
@@ -179,7 +197,7 @@ export function linearTracker() {
       return list;
     },
 
-    async move(chip, item, column) {
+    async move(board, item, column) {
       const state = await stateFor(item, column);
       if (!state) throw new Error(`${item.ref}'s team has no state like ${column.title}.`);
       await linear("save_issue", { id: item.id, state: state.id });
@@ -187,17 +205,16 @@ export function linearTracker() {
 
     // Reads the issue again so the description is current, then gives claude-new's props: the issue's
     // own branch name, the board's repo; model and effort are picked in the dialog.
-    async start(chip, item) {
+    async start(board, item) {
       let fresh = item;
-      try { fresh = { ...item, ...card(chip, await linear("get_issue", { id: item.id })) }; } catch {}  // the card's copy will do
-      const labels = fresh.labels.map(l => l.title);
-      const lines = [`Linear issue ${item.ref}: ${fresh.title}`, "",
-        (fresh.description ?? "").trim(), "",
-        ...(labels.length ? [`Labels: ${labels.join(", ")}`] : []), item.url, "",
+      try { fresh = { ...item, ...card(board, await linear("get_issue", { id: item.id })) }; } catch {}  // the card's copy will do
+      const message = ticketMessage({
+        heading: `Linear issue ${item.ref}: ${fresh.title}`,
+        description: fresh.description, labels: fresh.labels.map(l => l.title), url: item.url,
         // The session moves its own issue from here on (the linear-ticket Claude skill reads this line).
-        `Linear ticket: issue ${item.ref}, team ${item.teamKey}. Keep its status updated as the work progresses (linear-ticket skill).`];
-      const message = lines.filter((l, i) => l !== "" || (i > 0 && lines[i - 1] !== "")).join("\n").trim();
-      const target = await targetOf(chip.repo);
+        ticket: `Linear ticket: issue ${item.ref}, team ${item.teamKey}. Keep its status updated as the work progresses (linear-ticket skill).`,
+      });
+      const target = await targetOf(board.repo);
       return { ...target, message, label: item.label, ...(fresh.branch ? { branch: fresh.branch } : {}),
         ref: { tracker: "linear", issue: item.id, identifier: item.ref, team: item.team, assigned: fresh.assigned } };
     },
@@ -210,23 +227,37 @@ export function linearTracker() {
       await linear("save_issue", { id: ref.issue, state: started.id, ...(ref.assigned ? {} : { assignee: "me" }) });
     },
 
-    // issue-board-edit's props for a new issue in column (the board's team, that state), or for editing item.
-    editProps(chip, column, item, mode) {
-      const state = (statuses.get(chip.team) ?? []).find(s => lower(s.name) === column.id);
-      return { tracker: "linear", mode,
-        bucket: { id: column.id, title: column.title },
-        create: item ? null : { team: chip.team, ...(state ? { state: state.id } : {}),
-          ...(chip.kind === "mine" ? { assignee: "me" } : {}),
-          ...(chip.kind === "cycle" && cycles.get(chip.team)?.id ? { cycle: cycles.get(chip.team).id } : {}),
-          ...(chip.kind === "project" ? { project: chip.slug } : {}) },
-        task: item ? { id: item.id, identifier: item.ref, title: item.title, description: item.description, labels: [] } : null };
+    // The edit dialog's own props: save_issue's fields for a new issue in column (the board's team, that state).
+    editProps(board, column) {
+      const state = (statuses.get(board.team) ?? []).find(s => lower(s.name) === column.id);
+      return { create: { team: board.team, ...(state ? { state: state.id } : {}),
+        ...(board.kind === "mine" ? { assignee: "me" } : {}),
+        ...(board.kind === "cycle" && cycles.get(board.team)?.id ? { cycle: cycles.get(board.team).id } : {}),
+        ...(board.kind === "project" ? { project: board.slug } : {}) } };
     },
 
-    openUrl(chip) {
-      if (chip.link) return chip.link;
+    // The edit dialog's fresh copy of an issue: { title, description, labels } (labels unused: no settings).
+    async read(id) {
+      const m = await linear("get_issue", { id });
+      return { title: m.title, description: m.description ?? "", labels: [] };
+    },
+
+    // Saves the edit dialog: issue id, or a new one with edit.create's fields (created(id) right after
+    // it's made, so a retry after an error edits it).
+    async save(edit, { id, title, description }, created) {
+      if (id) {
+        await linear("save_issue", { id, title, description });
+        return;
+      }
+      const made = await linear("save_issue", { ...edit.create, title, description });
+      created(made?.id);
+    },
+
+    openUrl(board) {
+      if (board.link) return board.link;
       // The workspace's URL key comes from a loaded issue; before one, linear.app opens the last workspace.
       if (!org) return "https://linear.app";
-      return chip.kind === "cycle" ? `https://linear.app/${org}/team/${chip.team}/active` : `https://linear.app/${org}/my-issues/assigned`;
+      return board.kind === "cycle" ? `https://linear.app/${org}/team/${board.team}/active` : `https://linear.app/${org}/my-issues/assigned`;
     },
 
     // Opens the browser for Linear's sign-in and waits for it.
@@ -235,8 +266,8 @@ export function linearTracker() {
     },
 
     problem(e, what) {
-      if (e.status === 0 || e.status === 401) return { setup: true, message: "" };
-      if (e.status === 429) return { pause: true, message: "Linear is rate-limiting: the board waits 5 minutes before asking again." };
+      if (e.status === 0 || e.status === 401) return { setup: true, message: "Not signed in to Linear: sign in from the Board." };
+      if (e.status === 429) return { pause: true, message: "Linear is rate-limiting: wait a few minutes." };
       return { message: e.status === undefined ? e.message : `Couldn't ${what}: ${e.message}` };
     },
   };

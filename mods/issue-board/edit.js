@@ -1,39 +1,40 @@
-// Creates a Vikunja task in a bucket, or edits a task's title and description (the issue board's
-// "+" and Edit). Props { mode: "new" | "edit", url, project, view, bucket: {id, title},
-// task: {id, identifier, title, description, labels: [{id, title}]} }. Descriptions are read and written as Markdown.
-// Model and Effort set the task's model/ and effort/ labels (Default: none), which the Board's Start
-// hands to claude-new. Those labels must already exist in Vikunja (this token can't create labels).
-// After a save, shared "issue-board.changed" gets Date.now() so the board refreshes; on an error the
-// dialog stays open with what was typed. Enter in the title or Cmd+Enter saves, Esc cancels.
-// Props { tracker: "linear", create: { team, state?, assignee?, cycle?, project? } } (a Board's Linear chip):
-// the same dialog for a Linear issue, through Linear's MCP server (./linear.js): get_issue, then save_issue
-// with the title and description (and create's fields for a new one). No Model or Effort rows: Linear
-// issues keep no model/effort labels (they're picked in claude-new).
-import { View, div } from "gpui-kit";
+// The board's edit dialog: a new item in a column (the "+"), or an item's title and description (Edit),
+// saved through the board's tracker. The board opens issue-board again with props { edit: { tracker, url,
+// column: {id, title}, task: {id, ref, title, description, labels: [{id, title}]} | null, … } } (the rest
+// is the tracker's editProps). Descriptions are read and written as Markdown. A tracker with settings
+// (Vikunja) adds Model and Effort rows: the task's model/ and effort/ labels, which the board's Start
+// hands to claude-new. After a save, shared CHANGED gets Date.now() so the board refreshes; on an error
+// the dialog stays open with what was typed. Enter in the title or Cmd+Enter saves, Esc cancels.
+import { div } from "gpui-kit";
 import { v_flex, h_flex, InputState, Input, TextareaState, Textarea } from "gpui-base";
 import { props, closeOverlay, theme, checking, setShared } from "herdr";
-import { mcp, MODELS, EFFORTS, SETTING, setting } from "./vikunja.js";
-import { linear } from "./linear.js";
+import { vikunjaTracker } from "./tracker-vikunja.js";
+import { linearTracker } from "./tracker-linear.js";
+
+// Written after a save; the board refreshes when it changes.
+export const CHANGED = "issue-board.changed";
 
 const withOwn = (list, value) => (!value || list.includes(value) ? list : [...list, value]);
+// A tracker without settings: no model or effort.
+const NONE = () => ({ model: "", effort: "" });
 
-export default class IssueBoardEdit extends View {
+export class EditDialog {
   init(_props, cx) {
-    const p = props() ?? {};
-    this.linear = p.tracker === "linear";
-    this.edit = p.mode === "edit";
-    this.taskId = p.task?.id;
-    this.labels = p.task?.labels ?? [];  // the task's labels as last read: a save keeps all but model/effort
-    this.model = setting(this.labels, "model");
-    this.effort = setting(this.labels, "effort");
+    const edit = props()?.edit ?? {};
+    this.edit = edit;
+    this.tracker = edit.tracker === "linear" ? linearTracker() : vikunjaTracker({ url: edit.url });
+    this.settingsOf = this.tracker.settings?.of ?? NONE;
+    this.taskId = edit.task?.id ?? null;  // a new item's id once it's made: saving again edits it
+    this.labels = edit.task?.labels ?? [];  // the task's labels as last read: a save keeps all but model/effort
+    ({ model: this.model, effort: this.effort } = this.settingsOf(this.labels));
     this.error = "";
     this.saving = false;
     this.title = InputState.new({ placeholder: "Title" });
     this.description = TextareaState.new({ placeholder: "Description (Markdown, optional)", rows: 6 });
     this.description.set_auto_grow(6, 18);
-    if (this.edit) {
-      this.title.set_value(p.task?.title ?? "");
-      this.description.set_value(p.task?.description ?? "");
+    if (edit.task) {
+      this.title.set_value(edit.task.title ?? "");
+      this.description.set_value(edit.task.description ?? "");
     }
     this.at = "title";  // what has the keyboard, for Tab: "title", "description", "model" or "effort"
     this.title.on("focus", (_e, cx) => { this.at = "title"; cx.notify(); });
@@ -54,25 +55,21 @@ export default class IssueBoardEdit extends View {
       { keystroke: "tab", action: "issue_board_edit_next", context: "IssueBoardEdit" },
       { keystroke: "shift-tab", action: "issue_board_edit_prev", context: "IssueBoardEdit" },
     ]);
-    if (this.edit && !checking()) this.readFresh(p, cx);
+    if (edit.task && !checking()) this.readFresh(cx);
   }
 
   // The card's copy can be a minute old: read the task again, but only replace fields that still
   // hold the card's copy. Compares the values themselves, so it doesn't depend on when change events fire.
-  readFresh(p, cx) {
+  readFresh(cx) {
+    const task = this.edit.task;
     cx.spawn(async (cx) => {
       try {
-        const fresh = this.linear ? await linear("get_issue", { id: p.task.id })
-          : await mcp(p.url, "tasks_read", { task: p.task.id, format: "markdown",
-            fields: ["title", "description", "labels.id", "labels.title"] });
-        if (this.linear) fresh.labels = [];
-        const rowsUntouched = this.model === setting(this.labels, "model") && this.effort === setting(this.labels, "effort");
+        const fresh = await this.tracker.read(task.id);
+        const was = this.settingsOf(this.labels);
+        const rowsUntouched = this.model === was.model && this.effort === was.effort;
         this.labels = fresh.labels ?? [];
-        if (rowsUntouched) {
-          this.model = setting(this.labels, "model");
-          this.effort = setting(this.labels, "effort");
-        }
-        const untouched = this.title.value() === (p.task.title ?? "") && this.description.value() === (p.task.description ?? "");
+        if (rowsUntouched) ({ model: this.model, effort: this.effort } = this.settingsOf(this.labels));
+        const untouched = this.title.value() === (task.title ?? "") && this.description.value() === (task.description ?? "");
         if (untouched) {
           this.title.set_value(fresh.title ?? "");
           this.description.set_value(fresh.description ?? "");
@@ -91,56 +88,23 @@ export default class IssueBoardEdit extends View {
       cx.notify();
       return;
     }
-    const p = props();
-    const description = this.description.value();
-    const wanted = [["model", this.model], ["effort", this.effort]];
-    const relabel = !this.linear && wanted.some(([kind, value]) => value !== setting(this.labels, kind));
+    const form = { id: this.taskId, labels: this.labels, title, description: this.description.value(),
+      model: this.model, effort: this.effort };
     this.saving = true;
     this.error = "";
     cx.notify();
     cx.spawn(async (cx) => {
-      const fail = (message) => { this.saving = false; this.error = message; cx.notify(); };
       try {
-        // Labels are looked up first: a missing one stops the save before anything is written.
-        const chosen = [];
-        for (const [kind, value] of relabel ? wanted : []) {
-          if (!value) continue;
-          const name = `${kind}/${value}`;
-          const found = await mcp(p.url, "labels_list", { q: name, fields: ["id", "title"] });
-          const label = (found.items ?? []).find(l => l.title === name);
-          if (!label) return fail(`No "${name}" label in Vikunja: create it there first.`);
-          chosen.push(label);
-        }
-        if (this.linear) {
-          const made = await linear("save_issue", this.edit ? { id: this.taskId, title, description } : { ...p.create, title, description });
-          // From here on this dialog edits the issue it made: saving again after an error can't make a second one.
-          this.edit = true;
-          this.taskId ??= made?.id;
-        } else if (this.edit) {
-          await mcp(p.url, "tasks_update", { task: this.taskId, title, description, format: "markdown" });
-        } else {
-          const made = await mcp(p.url, "tasks_create", { project: p.project, title, description, bucket_id: p.bucket.id, format: "markdown" });
-          // From here on this dialog edits the task it made: saving again after an error can't make a second one.
-          this.edit = true;
-          this.taskId = made.id;
-          this.labels = [];
-        }
-        if (relabel) {
-          const labels = [...this.labels.filter(l => !SETTING.test(l.title ?? "")), ...chosen].map(l => ({ id: l.id, title: l.title }));
-          await mcp(p.url, "do_action", { action: "task_labels_bulk_replace", arguments: { task: this.taskId, labels } });
-        }
+        // From the moment it's made, this dialog edits the new item: saving again after an error can't make a second one.
+        await this.tracker.save(this.edit, form, (id) => { this.taskId = id; this.labels = []; });
       } catch (e) {
-        if (this.linear) {
-          return fail(e.status === 0 || e.status === 401 ? "Not signed in to Linear: sign in from the Board."
-            : e.status === 429 ? "Linear is rate-limiting: try again in a few minutes."
-            : `Couldn't save: ${e.message}`);
-        }
-        return fail(e.status === 0 ? "No Vikunja API token."
-          : e.status === 401 || e.status === 403 ? "This token can't write tasks: give it write access to tasks in Vikunja."
-          : `Couldn't save: ${e.message}`);
+        this.saving = false;
+        this.error = this.tracker.problem(e, "save it", true).message;
+        cx.notify();
+        return;
       }
-      setShared("issue-board.changed", Date.now());
-      closeOverlay(p.overlay);
+      setShared(CHANGED, Date.now());
+      closeOverlay(props().overlay);
     });
   }
 
@@ -149,7 +113,7 @@ export default class IssueBoardEdit extends View {
   }
 
   cycle(step, cx) {
-    const order = this.linear ? ["title", "description"] : ["title", "description", "model", "effort"];
+    const order = this.tracker.settings ? ["title", "description", "model", "effort"] : ["title", "description"];
     this.focusAt(order[(order.indexOf(this.at) + step + order.length) % order.length], cx);
   }
 
@@ -164,7 +128,9 @@ export default class IssueBoardEdit extends View {
 
   render() {
     const t = theme();
-    const p = props() ?? {};
+    const { task, column } = this.edit;
+    const noun = this.tracker.noun;
+    const settings = this.tracker.settings;
     const button = (id, text, primary, action) => h_flex().id(id).h(32).px(14).items_center().rounded(8)
       .border_1().border_color(primary ? t.solid : t.input).bg(primary ? t.solid : t.raised)
       .text_color(primary ? t.solid_foreground : t.foreground).text_size(12.5).font_medium().cursor_pointer()
@@ -196,17 +162,17 @@ export default class IssueBoardEdit extends View {
       .on_action("issue_board_edit_prev", (_e, cx) => this.cycle(-1, cx))
       .w_full().p(18).bg(t.popover).text_color(t.foreground)
       .child(h_flex().items_center()
-        .child(div().flex_1().text_size(15).font_semibold().child(`${this.edit ? "Edit" : "New"} ${this.linear ? "issue" : "task"}`))
+        .child(div().flex_1().text_size(15).font_semibold().child(`${this.taskId ? "Edit" : "New"} ${noun}`))
         .child(div().text_size(11).text_color(t.dim).child("Esc")))
       .child(div().pt(6).pb(14).text_size(11.5).text_color(t.dim)
-        .child(this.edit ? `Editing ${p.task?.identifier ?? `${this.linear ? "issue" : "task"} ${this.taskId}`}` : `New ${this.linear ? "issue" : "task"} in ${p.bucket?.title ?? "this column"}`))
+        .child(this.taskId ? `Editing ${task?.ref ?? `${noun} ${this.taskId}`}` : `New ${noun} in ${column?.title ?? "this column"}`))
       .child(field(Input.new(this.title).h(36), this.at === "title"))
       .child(div().h(8))
       .child(field(Textarea.new(this.description).py(8), this.at === "description"))
-      .when(!this.linear, el => el.child(div().h(10))
+      .when(Boolean(settings), el => el.child(div().h(10))
         .child(v_flex().gap(4)
-          .child(choice("vt-model", this.modelHandle, "model", "Model", withOwn(MODELS, this.model), this.model, (v) => { this.model = v; }))
-          .child(choice("vt-effort", this.effortHandle, "effort", "Effort", withOwn(EFFORTS, this.effort), this.effort, (v) => { this.effort = v; }))))
+          .child(choice("vt-model", this.modelHandle, "model", "Model", withOwn(settings.models, this.model), this.model, (v) => { this.model = v; }))
+          .child(choice("vt-effort", this.effortHandle, "effort", "Effort", withOwn(settings.efforts, this.effort), this.effort, (v) => { this.effort = v; }))))
       .child(div().h(16).pt(4).text_size(11).text_color(t.blocked).child(this.error))
       .child(h_flex().pt(12).gap(8).items_center()
         .child(div().flex_1().text_size(11).text_color(t.dim).child("⌘↩ to save"))

@@ -1,10 +1,10 @@
 // The Board's Vikunja side: a repo's board is one Vikunja project (projects.json: "board": { "vikunja": 16 }),
-// its first kanban view's buckets as columns. Same interface as ./tracker-linear.js; main.js only sees the
-// normalized board { key, tracker, title, repo, … } (chipOf), columns { id, title, limit, done, add, todo,
-// capped, cards } and cards { id, ref, title, description, done, doneAt, due, urgency, labels, who, url,
-// label }, and calls load, move, start, started, editProps, openUrl and problem.
-import { mcp, setting, SETTING } from "./vikunja.js";
-import { targetOf } from "./target.js";
+// its first kanban view's buckets as columns. Same interface as ./tracker-linear.js; main.js and ./edit.js
+// only see the board { key, tracker, repo, … } (parse), columns { id, title, limit, done, add, todo, capped,
+// cards } and cards { id, ref, title, description, done, doneAt, due, urgency, labels, who, url, label }.
+import { appHome } from "herdr";
+import { mcp, setting, SETTING, MODELS, EFFORTS } from "./vikunja.js";
+import { targetOf, ticketMessage } from "./target.js";
 
 // The terminal label Start puts on a card's session: the task id.
 const TASK = "vikunja.task";
@@ -17,6 +17,17 @@ export function vikunjaTracker({ url }) {
   const call = (tool, args) => mcp(url, tool, args);
   // A tool behind do_action (find_action lists them; this token sees buckets and task moves there).
   const action = (name, args) => call("do_action", { action: name, arguments: args });
+  const projects = new Map();  // project id -> { title, view }: its first kanban view
+
+  async function project(id) {
+    if (!projects.has(id)) {
+      const p = await call("projects_read", { id, fields: ["id", "title", "views.id", "views.view_kind", "views.position"] });
+      const kanban = (p.views ?? []).filter(v => v.view_kind === "kanban").sort(byPosition)[0];
+      if (!kanban) throw new Error(`Vikunja project ${id} (${p.title}) has no kanban view.`);
+      projects.set(id, { title: p.title, view: kanban.id });
+    }
+    return projects.get(id);
+  }
 
   const card = (task) => ({
     id: task.id,
@@ -37,25 +48,39 @@ export function vikunjaTracker({ url }) {
   return {
     name: "vikunja",
     title: "Vikunja",
+    noun: "task",
     labelKey: TASK,
-
-    // A repo's board from its projects.json value (a project id), or why it isn't one. The title and
-    // kanban view come with the first load.
-    chipOf(value, repo) {
-      if (!Number.isInteger(value) || value <= 0) return "vikunja must be a Vikunja project id (a number)";
-      return { key: `vikunja:${value}:${repo}`, tracker: "vikunja", title: null, project: value, view: null, repo };
+    // The board's "no board for this repo" hint.
+    hint: "a Vikunja project, by its id:",
+    example: `{ "vikunja": 16 }`,
+    setup: {
+      title: "No Vikunja API token",
+      text: `Create one in ${url} (Settings → API Tokens, with read and write access to projects and tasks), then save it to:`,
+      file: `${appHome()}/.vikunja-token`,
+    },
+    // The edit dialog's Model and Effort rows: the task's model/ and effort/ labels, which Start
+    // hands to claude-new.
+    settings: {
+      models: MODELS,
+      efforts: EFFORTS,
+      of: (labels) => ({ model: setting(labels, "model"), effort: setting(labels, "effort") }),
     },
 
-    async load(chip) {
-      if (!chip.view) {
-        const p = await call("projects_read", { id: chip.project, fields: ["id", "title", "views.id", "views.view_kind", "views.position"] });
-        const kanban = (p.views ?? []).filter(v => v.view_kind === "kanban").sort(byPosition)[0];
-        if (!kanban) throw new Error(`Vikunja project ${chip.project} (${p.title}) has no kanban view.`);
-        chip.title = p.title;
-        chip.view = kanban.id;
-      }
+    // A repo's board from its projects.json value (a project id). Throws why it isn't one.
+    parse(value, repo) {
+      if (!Number.isInteger(value) || value <= 0) throw new Error("vikunja must be a Vikunja project id (a number)");
+      return { key: `vikunja:${value}:${repo}`, tracker: "vikunja", project: value, repo };
+    },
+
+    // The project's title comes with the first load.
+    titleOf(board) {
+      return projects.get(board.project)?.title ?? `Vikunja project ${board.project}`;
+    },
+
+    async load(board) {
+      const { view } = await project(board.project);
       // Markdown descriptions: Start hands them to Claude as they are.
-      const buckets = await action("project_view_buckets_tasks_list", { project: chip.project, view: chip.view, format: "markdown" });
+      const buckets = await action("project_view_buckets_tasks_list", { project: board.project, view, format: "markdown" });
       return (Array.isArray(buckets) ? buckets : buckets.items ?? []).sort(byPosition).map(b => ({
         id: b.id, title: b.title, limit: b.limit, capped: false,
         done: named(b.title, "done"), add: !NO_ADD.some(n => named(b.title, n)), todo: named(b.title, "to-do"),
@@ -63,15 +88,17 @@ export function vikunjaTracker({ url }) {
       }));
     },
 
-    move(chip, item, column) {
-      return action("task_bucket_update", { project: chip.project, view: chip.view, bucket: column.id, task_id: item.id });
+    async move(board, item, column) {
+      const { view } = await project(board.project);
+      return action("task_bucket_update", { project: board.project, view, bucket: column.id, task_id: item.id });
     },
 
     // Reads the task again so the description is current, then gives claude-new's props. Plan mode is
     // unticked when the card is already in Plan (planning done: the next start is the work); otherwise
     // claude-new picks it (projects.json's board_start.plan, else ticked).
     // The session goes to the repo's main checkout and its space.
-    async start(chip, item, column) {
+    async start(board, item, column) {
+      const { view } = await project(board.project);
       let fresh = { ...item, identifier: item.ref };
       try {
         fresh = await call("tasks_read", { task: item.id, format: "markdown",
@@ -79,16 +106,16 @@ export function vikunjaTracker({ url }) {
       } catch {}  // the card's copy is at most a minute old: good enough to start from
       // model/ and effort/ labels become claude-new's flags, not part of the message.
       const labels = (fresh.labels ?? []).map(l => l.title).filter(t => t && !SETTING.test(t));
-      const lines = [`Vikunja task ${fresh.identifier || `#${fresh.index}`}: ${fresh.title}`, "",
-        (fresh.description ?? "").trim(), "",
-        ...(labels.length ? [`Labels: ${labels.join(", ")}`] : []), item.url, "",
+      const message = ticketMessage({
+        heading: `Vikunja task ${fresh.identifier || `#${fresh.index}`}: ${fresh.title}`,
+        description: fresh.description, labels, url: item.url,
         // The session moves its own card from here on (the vikunja-ticket Claude skill reads these ids).
-        `Vikunja ticket: task ${item.id}, project ${chip.project}, kanban view ${chip.view}. Keep its card updated as the work progresses (vikunja-ticket skill).`];
-      const target = await targetOf(chip.repo);
-      const message = lines.filter((l, i) => l !== "" || (i > 0 && lines[i - 1] !== "")).join("\n").trim();
+        ticket: `Vikunja ticket: task ${item.id}, project ${board.project}, kanban view ${view}. Keep its card updated as the work progresses (vikunja-ticket skill).`,
+      });
+      const target = await targetOf(board.repo);
       return { ...target, message, ...(named(column.title, "plan") ? { plan: false } : {}), label: item.label,
         model: setting(fresh.labels, "model"), effort: setting(fresh.labels, "effort"),
-        ref: { tracker: "vikunja", task: item.id, project: chip.project, view: chip.view } };
+        ref: { tracker: "vikunja", task: item.id, project: board.project, view } };
     },
 
     // A start confirmed in claude-new: the card goes to Plan or Doing.
@@ -101,21 +128,55 @@ export function vikunjaTracker({ url }) {
       await action("task_bucket_update", { project: ref.project, view: ref.view, bucket: bucket.id, task_id: ref.task });
     },
 
-    // issue-board-edit's props for a new task in column, or for editing item.
-    editProps(chip, column, item, mode) {
-      return { mode, url, project: chip.project, view: chip.view,
-        bucket: { id: column.id, title: column.title },
-        task: item ? { id: item.id, identifier: item.ref, title: item.title, description: item.description,
-          labels: item.labels.map(l => ({ id: l.id, title: l.title })) } : null };
+    // The edit dialog's own props: where a new task goes.
+    editProps(board) {
+      return { project: board.project };
     },
 
-    openUrl(chip) {
-      return `${url}/projects/${chip.project}/${chip.view}`;
+    // The edit dialog's fresh copy of a task: { title, description, labels }.
+    read(id) {
+      return call("tasks_read", { task: id, format: "markdown", fields: ["title", "description", "labels.id", "labels.title"] });
+    },
+
+    // Saves the edit dialog: task id, or a new task in edit.column (created(id) right after it's made,
+    // so a retry after a later error edits it). Model and effort replace the task's model/ and effort/
+    // labels, which must already exist in Vikunja (this token can't create labels); labels: the
+    // task's as last read.
+    async save(edit, { id, labels, title, description, model, effort }, created) {
+      const wanted = [["model", model], ["effort", effort]];
+      const relabel = wanted.some(([kind, value]) => value !== setting(labels, kind));
+      // Labels are looked up first: a missing one stops the save before anything is written.
+      const chosen = [];
+      for (const [kind, value] of relabel ? wanted : []) {
+        if (!value) continue;
+        const name = `${kind}/${value}`;
+        const found = await call("labels_list", { q: name, fields: ["id", "title"] });
+        const label = (found.items ?? []).find(l => l.title === name);
+        if (!label) throw new Error(`No "${name}" label in Vikunja: create it there first.`);
+        chosen.push(label);
+      }
+      if (id) {
+        await call("tasks_update", { task: id, title, description, format: "markdown" });
+      } else {
+        id = (await call("tasks_create", { project: edit.project, title, description, bucket_id: edit.column.id, format: "markdown" })).id;
+        labels = [];
+        created(id);
+      }
+      if (relabel) {
+        const kept = [...labels.filter(l => !SETTING.test(l.title ?? "")), ...chosen].map(l => ({ id: l.id, title: l.title }));
+        await action("task_labels_bulk_replace", { task: id, labels: kept });
+      }
+    },
+
+    openUrl(board) {
+      // Before the first load, the project's default view.
+      const view = projects.get(board.project)?.view;
+      return `${url}/projects/${board.project}${view ? `/${view}` : ""}`;
     },
 
     // What an error means for the Board: setup (no token), readOnly (a write the token can't do), and a message.
     problem(e, what, write = false) {
-      if (e.status === 0) return { setup: true, message: "" };
+      if (e.status === 0) return { setup: true, message: "No Vikunja API token." };
       if (write && (e.status === 401 || e.status === 403)) {
         return { readOnly: true, message: "This token can't change tasks: give it write access to tasks in Vikunja." };
       }

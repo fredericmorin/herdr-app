@@ -1,4 +1,4 @@
-// Vikunja's MCP server (<url>/api/v2/mcp). Copied as mods/issue-board-edit/vikunja.js (mods can't import across folders): keep both the same.
+// Vikunja's MCP server (<url>/api/v2/mcp).
 // The token is in ~/.config/herdr-app/.vikunja-token (git-ignored).
 import { exec, readTextFile, appHome } from "herdr";
 

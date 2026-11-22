@@ -1,5 +1,4 @@
-// Linear's MCP server through mods/issue-board/linear-mcp.mjs (Node: OAuth sign-in, one MCP session per run).
-// Copied as mods/issue-board-edit/linear.js (mods can't import across folders): keep both the same.
+// Linear's MCP server through ./linear-mcp.mjs (Node: OAuth sign-in, one MCP session per run).
 import { exec, appHome } from "herdr";
 
 // status: 0 not signed in (run login), 401 refused, 429 rate-limited, -1 anything else.

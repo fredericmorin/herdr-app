@@ -17,7 +17,6 @@
 !/mods/git-graph/
 !/mods/tab-history/
 !/mods/issue-board/
-!/mods/issue-board-edit/
 !/mods/keybind/
 mods/**/gpui-kit.d.ts
 mods/**/jsconfig.json

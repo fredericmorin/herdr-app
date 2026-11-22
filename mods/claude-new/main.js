@@ -11,6 +11,7 @@
 // (the Board: the ticket's model/ and effort/ labels); a value not in the lists gets a chip of its own.
 // Props { started, ref }: on Start (not Cancel), shared state `started` gets { plan, at, ref } so the opener can react;
 // with ref (the Board) and Plan mode ticked, the message also asks Claude to ask clarifying questions first.
+// Props { label: "k=v" } put that label on the session's terminal (the Board finds a card's session by it).
 // The branch is required for a worktree; `claude -p` suggests one from the prompt while it's
 // typed (<user>_<words_with_underscores>, user from `whoami`), until the branch is edited by hand.
 // The message is multi-line: Enter adds a line, Cmd+Enter starts from anywhere in the dialog (Enter too, in the
@@ -157,9 +158,13 @@ export default class ClaudeNew extends View {
     // A Board start in Plan mode asks before planning.
     if (p.ref && this.plan) prompt = `${prompt}\n\n${PLAN_ASK}`.trim();
     // `--` keeps a prompt that starts with "-" from being read as an option, so options go before it.
-    const argv = ["claude", ...(this.plan ? ["--permission-mode", "plan"] : []),
+    const claude = ["claude", ...(this.plan ? ["--permission-mode", "plan"] : []),
       ...(this.model ? ["--model", this.model] : []), ...(this.effort ? ["--effort", this.effort] : []),
       ...(prompt ? ["--", prompt] : [])];
+    // The terminal labels itself (HC_TERMINAL_ID is set in every core terminal), then becomes Claude.
+    const argv = p.label
+      ? ["sh", "-c", 'hc label "$HC_TERMINAL_ID" "$1" >/dev/null; shift; exec "$@"', "sh", p.label, ...claude]
+      : claude;
     if (!this.worktree) {
       if (!this.target?.space && this.target?.cwd) run("space.new", { folder: this.target.cwd, argv });
       else run("tab.new", { space: this.target?.space, folder: this.target?.cwd, argv });

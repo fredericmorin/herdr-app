@@ -6,11 +6,14 @@
 // skill (~/.claude/skills) moves the card on from there, through the vikunja MCP server.
 // The card's model/ and effort/ labels pick claude-new's Model and Effort (Default without them).
 // "+" in a column and Edit on a card open vikunja-task, which saves and pings the board to refresh.
+// Start labels the session's terminal vikunja.task=<id> (claude-new's label prop): while Claude runs
+// there, the card shows that session's space, tab and status, a click goes to it, and Start gives way
+// to a Vikunja button. A click on a column's title folds it to a strip (Done starts folded).
 // Props { url, project }: the Vikunja instance and the parent project. Talks to Vikunja's own MCP
 // server (<url>/api/v2/mcp) through ./vikunja.js.
 import { View, div, svg } from "gpui-kit";
 import { v_flex, h_flex } from "gpui-base";
-import { props, theme, exec, openOverlay, appHome, checking, shared, layout, run, spaces, panes } from "herdr";
+import { props, theme, exec, openOverlay, appHome, checking, shared, layout, run, spaces, panes, agents, terminals } from "herdr";
 import { mcp, setting, SETTING } from "./vikunja.js";
 
 const REFRESH = 60_000;
@@ -18,8 +21,15 @@ const REFRESH = 60_000;
 const STARTED = "vikunja.started";
 // vikunja-task writes Date.now() here after a save; the board then refreshes.
 const CHANGED = "vikunja.changed";
+// The terminal label Start puts on a card's session: the task id.
+const TASK = "vikunja.task";
 const named = (bucket, title) => (bucket?.title ?? "").trim().toLowerCase() === title;
 const COLUMN = 272;
+
+function ago(ms) {
+  const m = Math.floor((Date.now() - ms) / 60_000);
+  return m < 1 ? "just now" : m < 60 ? `${m}m ago` : `${Math.floor(m / 60)}h ago`;
+}
 
 function findNode(node, id) {
   if (!node) return null;
@@ -138,6 +148,7 @@ export default class VikunjaBoard extends View {
         this.buckets = (Array.isArray(buckets) ? buckets : buckets.items ?? []).sort(byPosition);
         this.error = root ? "" : `Project ${this.root} not found`;
         this.noToken = false;
+        this.syncedAt = Date.now();
       } catch (e) {
         this.noToken = e.status === 0;
         this.error = this.noToken ? "" : `Couldn't load the board: ${e.message}`;
@@ -193,7 +204,7 @@ export default class VikunjaBoard extends View {
       const target = await targetOf(project?.title);
       const message = lines.filter((l, i) => l !== "" || (i > 0 && lines[i - 1] !== "")).join("\n").trim();
       openOverlay({ mod: "claude-new", kind: "dialog", width: 560, props: {
-        ...(target ?? {}), message, plan: !named(bucket, "plan"), started: STARTED,
+        ...(target ?? {}), message, plan: !named(bucket, "plan"), started: STARTED, label: `${TASK}=${task.id}`,
         model: setting(fresh.labels, "model"), effort: setting(fresh.labels, "effort"),
         ref: { task: task.id, project: project?.id, view: project?.view } } });
     });
@@ -215,6 +226,35 @@ export default class VikunjaBoard extends View {
     const bucket = this.buckets.find(b => named(b, title.toLowerCase()));
     if (!bucket) { this.error = `No "${title}" bucket in this project's board.`; return; }
     this.move({ id: s.ref.task }, bucket, cx);
+  }
+
+  // A column's fold, as last clicked in this project; Done starts folded.
+  folded(bucket) {
+    const saved = localStorage.getItem(`fold:${this.selected}:${bucket.id}`);
+    return saved == null ? named(bucket, "done") : saved === "1";
+  }
+
+  fold(bucket, cx) {
+    localStorage.setItem(`fold:${this.selected}:${bucket.id}`, this.folded(bucket) ? "0" : "1");
+    cx.notify();
+  }
+
+  // Each task's live Claude session, from the label Start put on its terminal: task id ->
+  // { pane, status, where }. A terminal left with only its shell (Claude exited) doesn't count.
+  sessions() {
+    const byAddress = new Map(agents().map(a => [a.address, a]));
+    const tabs = new Map(spaces().flatMap(s => (s.tabs ?? []).map(c => [c.id, { space: s.name, tab: c.name, named: c.named }])));
+    const found = new Map();
+    for (const term of terminals()) {
+      const id = term.labels?.[TASK];
+      const agent = id && term.program?.agent ? byAddress.get(term.address) : null;
+      if (!agent || found.has(id)) continue;
+      const at = tabs.get(agent.tab);
+      // An unnamed tab goes by its number: the agent's title says more, as in the tab bar.
+      const tab = at?.named ? at.tab : agent.title || at?.tab || agent.tab_name;
+      found.set(id, { pane: agent.pane, status: agent.status, where: `${at?.space ?? agent.space_name} › ${tab}` });
+    }
+    return found;
   }
 
   // Opens vikunja-task: a new task in bucket, or task to edit.
@@ -251,23 +291,43 @@ export default class VikunjaBoard extends View {
         .hover(s => s.bg(t.hover)).on_click((_e, cx) => this.select(p.id, cx)).child(p.title);
     };
 
+    const sessions = this.sessions();
+    const mark = (status) => status === "working"
+      ? svg("mods/workspace-chrome/spinner.svg").size(10).flex_none().text_color(t.working).spin(900)
+      : div().size(8).flex_none().rounded(4).bg(t[status] ?? t.dim);
+
     const card = (task, bucket) => {
       const date = due(task.due_date);
       const moving = this.moving === task.id;
+      const session = sessions.get(String(task.id));
+      const browse = () => exec("open", [`${this.url}/tasks/${task.id}`]);
+      // Same jump as the agents list: the terminals come back if the Board is up.
+      const goToSession = () => {
+        if (findNode(layout(), "center")?.active === "board") run("layout.select", { stack: "center", child: "main" });
+        run("pane.focus", { pane: session.pane });
+      };
       return v_flex().id(`task-${task.id}`).w_full().p(10).gap(6).rounded(8).bg(t.background).border_1()
         .border_color(moving ? t.accent : t.border).hover(s => s.bg(t.hover))
-        .on_click(() => exec("open", [`${this.url}/tasks/${task.id}`]))
+        .on_click(() => session ? goToSession() : browse())
         .child(h_flex().gap(6).items_start()
           .child(div().flex_none().text_size(11.5).text_color(t.dim).child(task.identifier || `#${task.index}`))
           .child(div().flex_1().min_w(0).text_size(13).font_medium().text_color(task.done ? t.dim : t.foreground)
             .when(task.done, el => el.line_through()).child(task.title)))
+        .when(Boolean(session), el => el.child(h_flex().gap(6).items_center().text_size(11.5).text_color(t.muted)
+          .child(mark(session.status))
+          .child(div().flex_1().min_w(0).truncate().child(session.where))
+          .when(Boolean(session.status), el => el.child(div().flex_none()
+            .text_color(session.status === "blocked" ? t.blocked : t.muted)
+            .child(session.status === "blocked" ? "needs you" : session.status)))))
         .when((task.labels ?? []).length > 0 || date || task.priority >= 3, el => el.child(h_flex().flex_wrap().gap(4).items_center()
           .when(task.priority >= 3, el => el.child(div().text_size(11).text_color(task.priority >= 4 ? t.blocked : t.working).child(task.priority >= 4 ? "!!" : "!")))
           .children((task.labels ?? []).map(l => div().px(6).h(18).flex().items_center().rounded(4).text_size(11)
             .bg(`#${(l.hex_color || "888888").replace(/^#/, "").slice(0, 6)}33`).text_color(t.foreground).child(l.title)))
           .when(Boolean(date), el => el.child(div().text_size(11).text_color(date.late && !task.done ? t.blocked : t.dim).child(date.text)))))
         .child(h_flex().gap(4)
-          .child(button(`start-${task.id}`, "Start", (_e, cx) => this.start(task, bucket, cx)))
+          .child(session
+            ? button(`vikunja-${task.id}`, "Vikunja", () => browse())
+            : button(`start-${task.id}`, "Start", (_e, cx) => this.start(task, bucket, cx)))
           .when(!this.readOnly, el => el.child(button(`edit-${task.id}`, "Edit", () => this.editTask("edit", bucket, task))))
           .when(!this.readOnly && this.buckets.length > 1, el => el.child(button(`move-${task.id}`, moving ? "Cancel" : "Move", (_e, cx) => { this.moving = moving ? null : task.id; cx.notify(); }))))
         .when(moving, el => el.child(h_flex().flex_wrap().gap(4)
@@ -277,10 +337,20 @@ export default class VikunjaBoard extends View {
     const column = (bucket) => {
       const tasks = bucket.tasks ?? [];
       const count = bucket.limit > 0 ? `${tasks.length}/${bucket.limit}` : String(tasks.length);
+      const countColor = bucket.limit > 0 && tasks.length > bucket.limit ? t.blocked : t.dim;
+      // Folded: a strip with the count and the title's letters stacked; a click opens it again.
+      if (this.folded(bucket)) {
+        return v_flex().id(`bucket-${bucket.id}`).w(40).flex_none().h_full().py(8).gap(6).items_center().rounded(8)
+          .bg(t.chrome).hover(s => s.bg(t.hover)).on_click((_e, cx) => this.fold(bucket, cx))
+          .child(div().text_size(11).text_color(countColor).child(count))
+          .child(v_flex().items_center()
+            .children(Array.from(bucket.title).map(c => div().text_size(12.5).font_semibold().text_color(t.muted).child(c))));
+      }
       return v_flex().id(`bucket-${bucket.id}`).w(COLUMN).flex_none().h_full().min_h(0).gap(8)
         .child(h_flex().gap(8).items_center().px(2)
-          .child(div().font_semibold().text_size(12.5).text_color(t.foreground).child(bucket.title))
-          .child(div().text_size(11).text_color(bucket.limit > 0 && tasks.length > bucket.limit ? t.blocked : t.dim).child(count))
+          .child(div().id(`fold-${bucket.id}`).font_semibold().text_size(12.5).text_color(t.foreground)
+            .hover(s => s.text_color(t.accent)).on_click((_e, cx) => this.fold(bucket, cx)).child(bucket.title))
+          .child(div().text_size(11).text_color(countColor).child(count))
           .child(div().flex_1())
           .when(!this.readOnly, el => el.child(button(`new-${bucket.id}`, "+", () => this.editTask("new", bucket, null)))))
         .child(v_flex().id(`cards-${bucket.id}`).flex_1().min_h(0).gap(8).overflow_y_scrollbar()
@@ -292,6 +362,7 @@ export default class VikunjaBoard extends View {
       .children(this.projects.map(chip))
       .child(div().flex_1())
       .when(this.loading, el => el.child(svg("mods/workspace-chrome/spinner.svg").size(12).text_color(t.dim).spin(900)))
+      .when(Boolean(this.syncedAt), el => el.child(div().px(4).text_size(11).text_color(t.dim).child(`synced ${ago(this.syncedAt)}`)))
       .child(button("refresh", "↻", (_e, cx) => this.refresh(cx)))
       .when(Boolean(project), el => el.child(button("open-vikunja", "Open in Vikunja", () => exec("open", [`${this.url}/projects/${project.id}/${project.view}`]))));
 

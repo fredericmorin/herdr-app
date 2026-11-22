@@ -3,7 +3,8 @@
 //   { "new": [ { "if": { "shown": "board" }, "do": "vikunja-board.new" }, { "do": "space.new" } ] }
 // `if.shown`: a layout node id that's on screen (not hidden, and the active child of every stack
 // above it). No `if`: always. `do`: a keys.json-style action, "name", "name:value" (the value
-// fills the command's first argument) or { "command", "args" }; "<mod>.<command>" works too.
+// fills the command's first argument) or { "command", "args" }; "<mod>.<command>" works too; a list
+// of actions runs each in turn.
 // Draws nothing: it floats in my-main (patcher's keybind-float) so it's always loaded.
 
 import { View, div } from "gpui-kit";
@@ -56,12 +57,14 @@ export default class Keybind extends View {
         }
         const rule = (rules ?? []).find((r) => holds(r.if));
         if (!rule) continue;
-        const [command, args] = parse(rule.do);
-        // A mod's run() makes spaces on this computer; a key makes them on the focused space's machine.
-        if (command === "space.new" && !("machine" in args)) {
-          args.machine = spaces().find((s) => s.id === focused()?.space)?.machine ?? "";
+        for (const action of Array.isArray(rule.do) ? rule.do : [rule.do]) {
+          const [command, args] = parse(action);
+          // A mod's run() makes spaces on this computer; a key makes them on the focused space's machine.
+          if (command === "space.new" && !("machine" in args)) {
+            args.machine = spaces().find((s) => s.id === focused()?.space)?.machine ?? "";
+          }
+          run(command, args);
         }
-        run(command, args);
       }
     });
   }

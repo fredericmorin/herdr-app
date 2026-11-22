@@ -2,5 +2,13 @@
   "new": [
     { "if": { "shown": "board" }, "do": "vikunja-board.new" },
     { "do": "space.new" }
+  ],
+  "agent-prev": [
+    { "if": { "shown": "board" }, "do": [{ "command": "layout.select", "args": { "stack": "center", "child": "main" } }, "agent.prev"] },
+    { "do": "agent.prev" }
+  ],
+  "agent-next": [
+    { "if": { "shown": "board" }, "do": [{ "command": "layout.select", "args": { "stack": "center", "child": "main" } }, "agent.next"] },
+    { "do": "agent.next" }
   ]
 }

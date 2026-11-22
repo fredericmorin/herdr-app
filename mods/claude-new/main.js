@@ -13,7 +13,8 @@
 // with ref (the Board) and Plan mode ticked, the message also asks Claude to ask clarifying questions first.
 // The branch is required for a worktree; `claude -p` suggests one from the prompt while it's
 // typed (<user>_<words_with_underscores>, user from `whoami`), until the branch is edited by hand.
-// The message is multi-line: Enter adds a line, Cmd+Enter starts (Enter too, in the branch field), Esc cancels.
+// The message is multi-line: Enter adds a line, Cmd+Enter starts from anywhere in the dialog (Enter too, in the
+// branch field), Esc cancels.
 import { View, div } from "gpui-kit";
 import { v_flex, h_flex, InputState, Input, TextareaState, Textarea } from "gpui-base";
 import { openOverlay, run, focused, props, closeOverlay, theme, exec, home, checking, setShared } from "herdr";
@@ -147,6 +148,9 @@ export default class ClaudeNew extends View {
       cx.notify();
       return;
     }
+    // Cmd+Enter can reach both a field's submit and the dialog's key handler: start once.
+    if (this.closed) return;
+    this.closed = true;
     const p = props();
     closeOverlay(p.overlay);
     if (p.started) setShared(p.started, { plan: this.plan, at: Date.now(), ref: p.ref });
@@ -167,6 +171,7 @@ export default class ClaudeNew extends View {
 
   key(e, cx) {
     if (e.key === "escape") { closeOverlay(props().overlay); cx.stop_propagation(); }
+    else if (e.keystroke === "cmd-enter") { this.submit(cx); cx.stop_propagation(); }
   }
 
   cycle(step, cx) {

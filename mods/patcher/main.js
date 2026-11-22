@@ -24,6 +24,7 @@ const COPIES = [
   { from: "mods/spaces", to: "mods/my-spaces" },
   { from: "mods/tabs", to: "mods/my-tabs" },
   { from: "mods/agents", to: "mods/my-agents" },
+  { from: "mods/toast", to: "mods/my-toast" },
   { from: "layouts/main.json", to: "layouts/my-main.json" },
 ];
 // patches/<name>.patch, applied in this order. use-patched-copies goes first; each of the

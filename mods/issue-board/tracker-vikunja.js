@@ -1,8 +1,8 @@
-// The Board's Vikunja side: the parent project and its sub-projects as chips, each chip's kanban view's
-// buckets as columns. Same interface as ./tracker-linear.js; main.js only sees the normalized
-// chips { key, tracker, title, … } (chips() gives { chips, warning? }), columns { id, title, limit, done,
-// add, todo, capped, cards } and cards { id, ref, title, description, done, doneAt, due, urgency, labels,
-// who, url, label }, and calls load, move, start, started, editProps, openUrl and problem.
+// The Board's Vikunja side: a repo's board is one Vikunja project (projects.json: "board": { "vikunja": 16 }),
+// its first kanban view's buckets as columns. Same interface as ./tracker-linear.js; main.js only sees the
+// normalized board { key, tracker, title, repo, … } (chipOf), columns { id, title, limit, done, add, todo,
+// capped, cards } and cards { id, ref, title, description, done, doneAt, due, urgency, labels, who, url,
+// label }, and calls load, move, start, started, editProps, openUrl and problem.
 import { mcp, setting, SETTING } from "./vikunja.js";
 import { targetOf } from "./target.js";
 
@@ -13,7 +13,7 @@ const named = (title, name) => (title ?? "").trim().toLowerCase() === name;
 const NO_ADD = ["plan", "doing", "done"];
 const byPosition = (a, b) => a.position - b.position;
 
-export function vikunjaTracker({ url, root }) {
+export function vikunjaTracker({ url }) {
   const call = (tool, args) => mcp(url, tool, args);
   // A tool behind do_action (find_action lists them; this token sees buckets and task moves there).
   const action = (name, args) => call("do_action", { action: name, arguments: args });
@@ -39,29 +39,21 @@ export function vikunjaTracker({ url, root }) {
     title: "Vikunja",
     labelKey: TASK,
 
-    async chips() {
-      // The server caps pages (max_items_per_page, 50 here): read until a short page.
-      const all = [];
-      const fields = ["id", "title", "parent_project_id", "position", "is_archived", "views.id", "views.view_kind", "views.position"];
-      for (let page = 1; ; page++) {
-        const got = await call("projects_list", { page, per_page: 50, fields });
-        all.push(...got.items);
-        if (page >= (got.total_pages ?? 1)) break;
-      }
-      const kanban = (p) => (p.views ?? []).filter(v => v.view_kind === "kanban").sort(byPosition)[0]?.id;
-      const list = [];
-      const add = (p) => {
-        if (p.is_archived || !kanban(p)) return;
-        list.push({ key: `vikunja:${p.id}`, tracker: "vikunja", title: p.title, project: p.id, view: kanban(p) });
-        all.filter(c => c.parent_project_id === p.id && c.id > 0).sort(byPosition).forEach(add);
-      };
-      const top = all.find(p => p.id === root);
-      if (!top) throw new Error(`Project ${root} not found`);
-      add(top);
-      return { chips: list, signedIn: true };
+    // A repo's board from its projects.json value (a project id), or why it isn't one. The title and
+    // kanban view come with the first load.
+    chipOf(value, repo) {
+      if (!Number.isInteger(value) || value <= 0) return "vikunja must be a Vikunja project id (a number)";
+      return { key: `vikunja:${value}:${repo}`, tracker: "vikunja", title: null, project: value, view: null, repo };
     },
 
     async load(chip) {
+      if (!chip.view) {
+        const p = await call("projects_read", { id: chip.project, fields: ["id", "title", "views.id", "views.view_kind", "views.position"] });
+        const kanban = (p.views ?? []).filter(v => v.view_kind === "kanban").sort(byPosition)[0];
+        if (!kanban) throw new Error(`Vikunja project ${chip.project} (${p.title}) has no kanban view.`);
+        chip.title = p.title;
+        chip.view = kanban.id;
+      }
       // Markdown descriptions: Start hands them to Claude as they are.
       const buckets = await action("project_view_buckets_tasks_list", { project: chip.project, view: chip.view, format: "markdown" });
       return (Array.isArray(buckets) ? buckets : buckets.items ?? []).sort(byPosition).map(b => ({
@@ -78,7 +70,7 @@ export function vikunjaTracker({ url, root }) {
     // Reads the task again so the description is current, then gives claude-new's props. Plan mode is
     // unticked when the card is already in Plan (planning done: the next start is the work); otherwise
     // claude-new picks it (projects.json's board_start.plan, else ticked).
-    // The session goes to the project's repo and space (matched by name), not the focused one.
+    // The session goes to the repo's main checkout and its space.
     async start(chip, item, column) {
       let fresh = { ...item, identifier: item.ref };
       try {
@@ -92,22 +84,21 @@ export function vikunjaTracker({ url, root }) {
         ...(labels.length ? [`Labels: ${labels.join(", ")}`] : []), item.url, "",
         // The session moves its own card from here on (the vikunja-ticket Claude skill reads these ids).
         `Vikunja ticket: task ${item.id}, project ${chip.project}, kanban view ${chip.view}. Keep its card updated as the work progresses (vikunja-ticket skill).`];
-      const target = await targetOf({ name: chip.title });
+      const target = await targetOf(chip.repo);
       const message = lines.filter((l, i) => l !== "" || (i > 0 && lines[i - 1] !== "")).join("\n").trim();
-      return { ...(target ?? {}), message, ...(named(column.title, "plan") ? { plan: false } : {}), label: item.label,
+      return { ...target, message, ...(named(column.title, "plan") ? { plan: false } : {}), label: item.label,
         model: setting(fresh.labels, "model"), effort: setting(fresh.labels, "effort"),
         ref: { tracker: "vikunja", task: item.id, project: chip.project, view: chip.view } };
     },
 
-    // A start confirmed in claude-new: the card goes to Plan or Doing, in the shown project's columns.
-    async started(ref, plan, shown) {
+    // A start confirmed in claude-new: the card goes to Plan or Doing.
+    async started(ref, plan) {
       const title = plan ? "Plan" : "Doing";
-      if (shown.chip?.tracker !== "vikunja" || ref?.project !== shown.chip.project) {
-        throw new Error(`Couldn't move task ${ref?.task} to ${title}: its project isn't the one shown.`);
-      }
-      const column = shown.columns.find(c => named(c.title, title.toLowerCase()));
-      if (!column) throw new Error(`No "${title}" bucket in this project's board.`);
-      await this.move(shown.chip, { id: ref.task }, column);
+      // The ref's own project and view: the space shown can change while the session starts.
+      const got = await action("buckets_list", { project: ref.project, view: ref.view });
+      const bucket = (Array.isArray(got) ? got : got.items ?? []).find(b => named(b.title, title.toLowerCase()));
+      if (!bucket) throw new Error(`No "${title}" bucket in Vikunja project ${ref.project}'s board.`);
+      await action("task_bucket_update", { project: ref.project, view: ref.view, bucket: bucket.id, task_id: ref.task });
     },
 
     // issue-board-edit's props for a new task in column, or for editing item.

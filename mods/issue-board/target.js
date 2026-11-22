@@ -1,4 +1,4 @@
-// Where a chip's sessions start (claude-new's { space, folder } props), shared by the trackers.
+// Where a board's sessions start (claude-new's { space, folder } props), shared by the trackers.
 import { exec, spaces, panes } from "herdr";
 
 // The repo a folder belongs to: its main checkout, and whether the folder is a linked worktree.
@@ -15,25 +15,18 @@ export async function repoOf(folder, on) {
   return { top: top.out, main, linked: main !== top.out };
 }
 
-// The space whose first terminal is in a repo's main checkout, as { space, folder }. Only worktree
-// spaces of it: { folder } (its main checkout, no space). match { name }: spaces named like it (a
-// Vikunja project), none: null (claude-new then uses the focused space). match { main }: that repo's
-// main checkout on this computer (a Linear chip's repo), none: { folder: main }.
-export async function targetOf(match) {
-  const name = (match.name ?? "").trim().toLowerCase();
+// The space whose first terminal is in the repo's main checkout `main` (on this computer), as
+// { space, folder }; none: { folder: main } (claude-new then makes a worktree of it, or a space there).
+export async function targetOf(main) {
   const ps = panes();
-  let fallback = null;
   for (const s of spaces()) {
-    if (match.name !== undefined && (s.name ?? "").trim().toLowerCase() !== name) continue;
-    if (match.main && s.machine) continue;
+    if (s.machine) continue;
     const tabs = new Set((s.tabs ?? []).map((c) => c.id));
     const at = ps.find((p) => tabs.has(p.tab) && p.cwd)?.cwd || s.folder;
     // Spaces outside the repo can't be it: skips git for them.
-    if (match.main && !(at === match.main || at?.startsWith(`${match.main}/`))) continue;
-    const repo = at ? await repoOf(at, s.machine ?? undefined) : null;
-    if (!repo || (match.main && repo.main !== match.main)) continue;
-    if (!repo.linked) return { space: s.id, folder: repo.top };
-    fallback ??= { folder: repo.main };
+    if (!(at === main || at?.startsWith(`${main}/`))) continue;
+    const repo = await repoOf(at);
+    if (repo && repo.main === main && !repo.linked) return { space: s.id, folder: repo.top };
   }
-  return fallback ?? (match.main ? { folder: match.main } : null);
+  return { folder: main };
 }

@@ -25,12 +25,13 @@ const REFERENCE = `${START}
 //                                                           // board_start, else both ticked (Plan unticked for a card in Plan)
 //       "new_session": { "worktree": true, "plan": false }, // ... on Cmd+Shift+N and New worktree; default: top-level
 //                                                           // new_session, else worktree ticked, plan not
-//       "linear": [                                         // Linear chips on the Board; Start opens their sessions in this repo
-//         { "team": "API", "mine": true },                  // my issues in a team (no team: my issues in every team)
-//         { "team": "API", "cycle": true },                 // a team's active cycle
-//         { "project": "https://linear.app/<org>/project/<name>-<id>" },  // a Linear project; with "team", + adds there
-//         { "view": "https://linear.app/<org>/view/<name>-<id>", "title": "Bugs" }  // a custom view; "title" names any chip
-//       ]
+//       "board": { "vikunja": 16 }                          // the Board for this repo's spaces (worktrees too): a Vikunja
+//                                                           // project by id, or one Linear scope, "board": { "linear": … }:
+//                                                           //   { "team": "API", "mine": true }  my issues (no team: every team)
+//                                                           //   { "team": "API", "cycle": true } a team's active cycle
+//                                                           //   { "project": "https://linear.app/<org>/project/<name>-<id>" }
+//                                                           //   { "view": "https://linear.app/<org>/view/<name>-<id>" }
+//                                                           // with "team", + adds issues to a project or view; "title" names it
 //     }
 //   }
 // }

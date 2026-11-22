@@ -1,8 +1,8 @@
-// Kanban board of work items from Vikunja and Linear, one chip per source, side by side: Vikunja's parent
-// project and its sub-projects (./tracker-vikunja.js), then the Linear chips that projects.json lists under
-// each repo (./tracker-linear.js). Each chip's columns are its kanban buckets or workflow states. The two
-// trackers share one interface, so this file only draws chips, columns and cards and hands actions to the
-// shown chip's tracker.
+// The focused space's issue board: its repo's projects.json "board" (./config.js), a Vikunja project
+// (./tracker-vikunja.js) or one Linear scope (./tracker-linear.js); a worktree space shows its repo's.
+// Going to another space shows that space's board; a repo without one says how to add it. The columns
+// are the project's kanban buckets or the Linear teams' workflow states. The two trackers share one
+// interface, so this file only draws columns and cards and hands actions to the board's tracker.
 // Cards open in the browser, move to another column, or start a Claude session (claude-new) with the ticket
 // as its first message; confirming that dialog lets the tracker move the card (Vikunja: Plan or Doing; Linear:
 // In Progress, assigned to you if nobody has it) and switches the `center` stack back to the terminals.
@@ -15,15 +15,16 @@
 // Claude runs there, the card shows that session's space, tab and status, a click goes to it, and Start gives
 // way to a button that opens the item. A change in those sessions' statuses refreshes the board.
 // A done column shows its 10 most recently done cards; a Show all toggle under them lists the rest below it.
-// Props { url, project }: the Vikunja instance and the parent project.
+// Props { url }: the Vikunja instance.
 import { View, div, svg } from "gpui-kit";
 import { v_flex, h_flex } from "gpui-base";
-import { props, theme, nextCommand, exec, openOverlay, appHome, checking, shared, layout, run, spaces, agents, terminals } from "herdr";
+import { props, theme, nextCommand, exec, openOverlay, appHome, checking, shared, layout, run, spaces, agents, terminals, focused } from "herdr";
+import { repoOfSpace, boardOf, tilde } from "./config.js";
 import { vikunjaTracker } from "./tracker-vikunja.js";
 import { linearTracker } from "./tracker-linear.js";
 
 const REFRESH = 60_000;
-// How long a rate-limited tracker's chips wait before asking again.
+// How long a rate-limited tracker's boards wait before asking again.
 const PAUSE = 5 * 60_000;
 // claude-new writes { plan, at, ref } here when Start is confirmed; the board then has ref's tracker move it.
 const STARTED = "issue-board.started";
@@ -61,19 +62,19 @@ export default class IssueBoard extends View {
     const p = props() ?? {};
     const url = (p.url ?? "https://todo.endor.one").replace(/\/+$/, "");
     this.vikunjaUrl = url;
-    this.trackers = [vikunjaTracker({ url, root: p.project ?? 15 }), linearTracker()];
-    this.chips = [];    // every tracker's chips, in tracker order
-    this.columns = [];  // the shown chip's
-    // A stored number is from before the Linear chips: a Vikunja project id.
-    const stored = localStorage.getItem("chip") ?? localStorage.getItem("project");
-    this.selected = stored ? (/^\d+$/.test(stored) ? `vikunja:${stored}` : stored) : `vikunja:${p.project ?? 15}`;
+    this.trackers = { vikunja: vikunjaTracker({ url }), linear: linearTracker() };
+    this.board = null;     // the focused space's board (a tracker's chip), null without one
+    this.missing = null;   // without one: { repo } (the repo's main checkout, null outside git)
+    this.spaceId = null;   // the space the board was resolved for
+    this.columns = [];
     this.loading = false;
-    this.error = "";       // the shown chip's last load or action error
-    this.chipErrors = {};  // tracker name -> why its chips couldn't be listed
+    this.error = "";       // the board's last load or action error
+    this.boardError = "";  // why projects.json's board for this repo isn't usable
     this.setup = {};       // tracker name -> true when it needs a token or a sign-in
     this.readOnly = {};    // tracker name -> true once a write was refused
     this.pausedUntil = {}; // tracker name -> when a rate-limited tracker may load again
     this.signingIn = false;
+    this.handle = cx.focus_handle();
     this.moving = null;  // the card whose Move row is open
     this.showAll = false;  // a done column lists every card, not only the RECENT latest
     // The last confirmed start handled. A copy with nothing stored takes the current one as handled,
@@ -95,11 +96,44 @@ export default class IssueBoard extends View {
   }
 
   chip() {
-    return this.chips.find(c => c.key === this.selected) ?? null;
+    return this.board;
   }
 
   tracker(chip) {
-    return this.trackers.find(t => t.name === chip?.tracker) ?? null;
+    return chip ? this.trackers[chip.tracker] : null;
+  }
+
+  // The focused space's board from projects.json: sets board, missing and boardError.
+  async resolve() {
+    const spaceId = focused()?.space ?? null;
+    let board = null;
+    let missing = null;
+    this.boardError = "";
+    try {
+      // Other machines' repos aren't keys in projects.json.
+      const repo = spaceId ? await repoOfSpace(spaceId) : null;
+      const entry = repo && !repo.machine ? await boardOf(repo.main) : null;
+      if (!entry) {
+        missing = { repo: repo && !repo.machine ? repo.main : null };
+      } else {
+        const chip = this.trackers[entry.tracker].chipOf(entry.value, repo.main);
+        if (typeof chip === "string") this.boardError = `projects.json: ${entry.key}: board.${entry.tracker}: ${chip}`;
+        // The same board keeps what its loads learned (a Vikunja project's title and view).
+        else board = chip.key === this.board?.key ? this.board : chip;
+      }
+    } catch (e) {
+      this.boardError = e.message;
+    }
+    if (board?.key !== this.board?.key) {
+      this.columns = [];
+      this.moving = null;
+      this.showAll = false;
+      this.error = "";
+      this.syncedAt = null;
+    }
+    this.board = board;
+    this.missing = missing;
+    this.spaceId = spaceId;
   }
 
   // Applies what tracker says about error e: setup, read-only, the message.
@@ -118,23 +152,7 @@ export default class IssueBoard extends View {
     this.again = false;
     cx.notify();
     cx.spawn(async (cx) => {
-      // Each tracker's chips on their own: one failing leaves the others' usable.
-      const lists = await Promise.all(this.trackers.map(async (tracker) => {
-        try {
-          const { chips, warning, signedIn } = await tracker.chips();
-          this.chipErrors[tracker.name] = warning ?? "";
-          // Vikunja's chips need its token; Linear's come from projects.json and say nothing about sign-in.
-          if (signedIn) this.setup[tracker.name] = false;
-          return chips;
-        } catch (e) {
-          const p = tracker.problem(e, "load the board");
-          this.setup[tracker.name] = Boolean(p.setup);
-          this.chipErrors[tracker.name] = p.message;
-          return [];
-        }
-      }));
-      this.chips = lists.flat();
-      if (!this.chip()) this.selected = this.chips[0]?.key ?? this.selected;
+      await this.resolve();
       const chip = this.chip();
       const tracker = this.tracker(chip);
       // A rate-limited tracker keeps its columns and its message until the pause is over.
@@ -155,16 +173,6 @@ export default class IssueBoard extends View {
       cx.notify();
       if (this.again) this.refresh(cx);
     });
-  }
-
-  select(key, cx) {
-    this.selected = key;
-    this.moving = null;
-    this.showAll = false;
-    this.columns = [];
-    this.error = "";
-    localStorage.setItem("chip", key);
-    this.refresh(cx);
   }
 
   move(item, column, cx) {
@@ -207,13 +215,13 @@ export default class IssueBoard extends View {
     localStorage.setItem("started", String(s.at));
     // The session started from the Board (tab.new already selected its tab): show it, even if the move fails.
     if (findNode(layout(), "center")?.active === "board") run("layout.select", { stack: "center", child: "main" });
-    // Starts from before the Linear chips have no tracker in their ref.
-    const tracker = this.trackers.find(t => t.name === (s.ref?.tracker ?? "vikunja"));
+    // Starts from before Linear boards have no tracker in their ref.
+    const tracker = this.trackers[s.ref?.tracker ?? "vikunja"];
     if (!tracker) return;
     // render can't notify, and a spawned body would start inside it: a timer runs it after render returns.
     cx.timer.after(0, (cx) => cx.spawn(async (cx) => {
       try {
-        await tracker.started(s.ref, s.plan, { chip: this.chip(), columns: this.columns });
+        await tracker.started(s.ref, s.plan);
       } catch (e) {
         this.fail(tracker, e, "move it", true);
         cx.notify();
@@ -226,7 +234,7 @@ export default class IssueBoard extends View {
   // Each item's live Claude session, from the label Start put on its terminal: "key=value" ->
   // { pane, status, where }. A terminal left with only its shell (Claude exited) doesn't count.
   sessions() {
-    const keys = this.trackers.map(t => t.labelKey);
+    const keys = Object.values(this.trackers).map(t => t.labelKey);
     const byAddress = new Map(agents().map(a => [a.address, a]));
     const tabs = new Map(spaces().flatMap(s => (s.tabs ?? []).map(c => [c.id, { space: s.name, tab: c.name, named: c.named }])));
     const found = new Map();
@@ -293,6 +301,16 @@ export default class IssueBoard extends View {
       // throw left `loading` stuck): a timer calls it after render returns.
       cx.timer.after(0, (cx) => this.refresh(cx));
     }
+    // Another space focused: show its board.
+    const spaceNow = focused()?.space ?? null;
+    if (!this.loading && !checking() && spaceNow !== this.spaceId) cx.timer.after(0, (cx) => this.refresh(cx));
+    // Going to another space while the Board shows hands the keyboard to that space's terminal, hidden
+    // behind the Board, where keys reach nothing: the Board takes it. my-tabs gives it back to the pane
+    // when the terminals show again (board-toggle).
+    if (findNode(layout(), "center")?.active === "board" && this.keySpace !== undefined && spaceNow !== this.keySpace && !checking()) {
+      cx.timer.after(0, () => this.handle.focus());
+    }
+    this.keySpace = spaceNow;
     const t = theme();
     const stop = (_e, cx) => cx.stop_propagation();
     const chip = this.chip();
@@ -301,13 +319,6 @@ export default class IssueBoard extends View {
     const button = (id, label, action) => div().id(id).h(22).px(8).flex().items_center().rounded(5).text_size(11.5)
       .border_1().border_color(t.border).text_color(t.muted).hover(s => s.bg(t.hover).text_color(t.foreground))
       .on_mouse_down("left", stop).on_click((e, cx) => { cx.stop_propagation(); action(e, cx); }).child(label);
-
-    const chipView = (c) => {
-      const on = c.key === this.selected;
-      return div().id(`chip-${c.key}`).h(26).px(10).flex().items_center().rounded(6).text_size(12.5)
-        .bg(on ? t.selected : t.chrome).text_color(on ? t.foreground : t.muted)
-        .hover(s => s.bg(t.hover)).on_click((_e, cx) => this.select(c.key, cx)).child(c.title);
-    };
 
     const sessions = this.sessions();
     // A card's session changing status (or starting, or ending) is when it likely moved its card: reload then, not at the next minute.
@@ -392,8 +403,11 @@ export default class IssueBoard extends View {
           .when(cards.length === 0, el => el.child(div().p(10).text_size(11.5).text_color(t.dim).child("Nothing here"))));
     };
 
-    const header = h_flex().flex_none().gap(4).px(12).py(10).items_center().border_b(1).border_color(t.border)
-      .children(this.chips.map(chipView))
+    // A Vikunja project's title comes with its first load.
+    const title = chip ? (chip.title ?? `Vikunja project ${chip.project}`) : "Issue board";
+    const header = h_flex().flex_none().gap(8).px(12).py(10).items_center().border_b(1).border_color(t.border)
+      .child(div().h(26).flex().items_center().text_size(13).font_semibold().text_color(t.foreground).child(title))
+      .when(Boolean(chip), el => el.child(div().text_size(11.5).text_color(t.dim).child(`${tracker.title} · ${tilde(chip.repo)}`)))
       .child(div().flex_1())
       .when(this.loading, el => el.child(svg("mods/workspace-chrome/spinner.svg").size(12).text_color(t.dim).spin(900)))
       .when(Boolean(this.syncedAt), el => el.child(div().px(4).text_size(11).text_color(t.dim).child(`synced ${ago(this.syncedAt)}`)))
@@ -413,21 +427,33 @@ export default class IssueBoard extends View {
         ? div().text_size(12).text_color(t.dim).child("Waiting for the sign-in in the browser…")
         : button("linear-sign-in", "Sign in to Linear", (_e, cx) => this.signIn(tracker, cx))));
 
+    // A repo without a board: how to add one, for this repo.
+    const noBoard = () => {
+      const key = this.missing?.repo ? tilde(this.missing.repo) : null;
+      const code = (text) => div().font_family("JetBrains Mono").text_size(12).text_color(t.foreground).child(text);
+      return v_flex().p(20).gap(8).text_size(13).text_color(t.muted)
+        .child(div().text_color(t.foreground).font_semibold().child("No issue board for this project"))
+        .when(!key, el => el.child(div().child("This space isn't in a git repo on this computer, so it has no board.")))
+        .when(Boolean(key), el => el
+          .child(div().child(`Add one under ${key} in ${tilde(appHome())}/projects.json: a Vikunja project, by its id,`))
+          .child(code(`"${key}": { "board": { "vikunja": 16 } }`))
+          .child(div().pt(4).child("or one Linear scope: \"mine\": true (with or without a team), \"cycle\": true with a team, or a \"project\" or \"view\" URL."))
+          .child(code(`"${key}": { "board": { "linear": { "team": "ENG", "mine": true } } }`)));
+    };
+
     let body;
-    if (tracker?.name === "linear" && this.setup.linear) {
-      body = linearSetup();
-    } else if (tracker ? this.setup[tracker.name] : this.setup.vikunja) {
-      body = vikunjaSetup();
+    if (this.boardError || (!chip && !this.missing)) {
+      body = div();
+    } else if (!chip) {
+      body = noBoard();
+    } else if (this.setup[tracker.name]) {
+      body = tracker.name === "linear" ? linearSetup() : vikunjaSetup();
     } else {
       body = h_flex().id("columns").flex_1().min_h(0).p(12).gap(12).items_start().overflow_x_scrollbar().children(this.columns.map(column));
     }
-    // Lines over the shown chip's board: chips a tracker couldn't list, then the shown chip's error.
-    const problems = Object.values(this.chipErrors).filter(Boolean);
-    // Without a Vikunja token, other trackers' chips still show; say why Vikunja's don't.
-    if (this.setup.vikunja && tracker?.name !== "vikunja") problems.push(`No Vikunja API token: save one to ${appHome()}/.vikunja-token`);
-    if (this.error) problems.push(this.error);
+    const problems = [this.boardError, this.error].filter(Boolean);
 
-    return v_flex().id("issue-board").size_full().min_h(0).bg(t.canvas).text_color(t.foreground)
+    return v_flex().id("issue-board").track_focus(this.handle).size_full().min_h(0).bg(t.canvas).text_color(t.foreground)
       .child(header)
       .children(problems.map((text, i) => div().id(`problem-${i}`).px(12).py(6).text_size(12).text_color(t.blocked).child(text)))
       .child(body);

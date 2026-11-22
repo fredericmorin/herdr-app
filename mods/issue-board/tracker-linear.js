@@ -1,12 +1,11 @@
 // The Board's Linear side, through Linear's MCP server (./linear.js). Same interface as ./tracker-vikunja.js.
-// Chips come from projects.json, listed under the repo their sessions start in:
-//   "~/work/api": { "linear": [ { "team": "API", "mine": true }, { "team": "API", "cycle": true },
-//     { "project": "https://linear.app/acme/project/payments-1a2b3c4d5e6f" }, { "view": "<view URL>", "title": "Bugs" } ] }
-// Built for a big workspace: a chip is one server-side scope (never the workspace), only the shown chip
+// A repo's board is one Linear scope, from its projects.json "board": { "linear": { … } }, one of:
+//   { "team": "API", "mine": true }   { "team": "API", "cycle": true }   ("mine" without team: every team)
+//   { "project": "https://linear.app/acme/project/payments-1a2b3c4d5e6f" }   { "view": "<view URL>", "title": "Bugs" }
+// Built for a big workspace: a board is one server-side scope (never the workspace), only the shown one
 // loads, each open state type is one list_issues call capped at LIMIT (a full one marks its columns
 // capped: "50+" and a "More in Linear" row), and all of a refresh's calls share one helper run.
 // Columns are the workflow states of the teams involved, merged by name, in Linear's type order.
-import { readTextFile, appHome, home } from "herdr";
 import { linear, linearBatch, linearLogin, LinearError } from "./linear.js";
 import { targetOf } from "./target.js";
 
@@ -23,20 +22,15 @@ const FIELDS = ["id", "uuid", "title", "priority", "url", "gitBranchName", "upda
 // How long a team's current cycle is trusted before asking again.
 const CYCLE_TTL = 60 * 60_000;
 
-// projects.json allows // and /* */ comments: blank them outside strings, keeping line numbers for errors.
-// Same as claude-new's (a mod can't import another's files).
-const uncomment = (text) =>
-  text.replace(/"(?:\\.|[^"\\])*"|\/\/[^\n]*|\/\*[\s\S]*?\*\//g, (m) => (m.startsWith('"') ? m : m.replace(/[^\n]/g, " ")));
-const absolute = (path, userHome) => (path === "~" ? userHome : path.startsWith("~/") ? `${userHome}${path.slice(1)}` : path);
-
 // A linear.app project or view URL's 12-hex slug id, and the words before it ("payments" from payments-1a2b3c4d5e6f).
 function slugOf(kind, url) {
   const m = String(url ?? "").match(new RegExp(`linear\\.app/[^/]+/${kind}/(?:([^/?#]*)-)?([0-9a-f]{12})(?:[/?#]|$)`, "i"));
   return m ? { id: m[2].toLowerCase(), words: (m[1] ?? "").replace(/-/g, " ") } : null;
 }
 
-// One projects.json entry as a chip, or why it isn't one.
-function chipOf(repo, entry) {
+// A repo's board from its projects.json value, or why it isn't one.
+function chipOf(entry, repo) {
+  if (!entry || typeof entry !== "object" || Array.isArray(entry)) return "linear must be an object: { \"team\": \"API\", \"mine\": true }";
   const kinds = KINDS.filter(k => entry?.[k] !== undefined && entry[k] !== false);
   if (kinds.length !== 1) return "give exactly one of mine, cycle, project, view";
   const kind = kinds[0];
@@ -90,7 +84,7 @@ export function linearTracker() {
   }
 
   // list_issues' scope arguments for a chip. Projects and views go by their URL (list_issues takes a
-  // project's slug and a view's URL); a cycle chip asks for its team's current cycle once an hour.
+  // project's slug and a view's URL); a cycle board asks for its team's current cycle once an hour.
   async function scope(chip) {
     if (chip.kind === "mine") return { assignee: "me", ...(chip.team ? { team: chip.team } : {}) };
     if (chip.kind === "project") return { project: chip.slug };
@@ -122,7 +116,7 @@ export function linearTracker() {
       // Linear: 1 urgent, 2 high, 3 medium, 4 low, 0 none.
       urgency: priority === 1 ? 2 : priority === 2 ? 1 : 0,
       labels: (m.labels ?? []).map(l => ({ title: nameOf(l), color: l?.color ?? "#888888" })).filter(l => l.title),
-      // Whose it is, where a chip shows more than yours.
+      // Whose it is, where a board shows more than yours.
       who: chip.kind === "mine" ? null : nameOf(m.assignee),
       url: m.url,
       label: `${ISSUE}=${ref}`,
@@ -148,31 +142,14 @@ export function linearTracker() {
     title: "Linear",
     labelKey: ISSUE,
 
-    async chips() {
-      const raw = await readTextFile(`${appHome()}/projects.json`);
-      if (raw === null) return { chips: [] };
-      let file;
-      try { file = JSON.parse(uncomment(raw)) ?? {}; } catch (e) { throw new Error(`projects.json: ${e.message}`); }
-      const chips = [];
-      const bad = [];
-      for (const [repo, project] of Object.entries(file.projects ?? {})) {
-        if (project?.linear === undefined) continue;
-        if (!Array.isArray(project.linear)) { bad.push(`${repo}: linear must be a list`); continue; }
-        project.linear.forEach((entry, i) => {
-          const c = chipOf(absolute(repo, home()), entry);
-          if (typeof c === "string") bad.push(`${repo}: linear[${i}]: ${c}`);
-          else if (!chips.some(o => o.key === c.key)) chips.push(c);
-        });
-      }
-      return { chips, warning: bad.length ? `projects.json: ${bad.join("; ")}` : "" };
-    },
+    chipOf,
 
     async load(chip) {
       const args = await scope(chip);
       const types = [...OPEN, "completed"];
       const got = await linearBatch([
         ...types.map(state => ({ tool: "list_issues", args: { ...args, state, limit: LIMIT, orderBy: "updatedAt", fields: FIELDS } })),
-        // The chip's own team's states, even with no issues in some of them.
+        // The board's own team's states, even with no issues in some of them.
         ...(chip.team && !statuses.has(chip.team) ? [{ tool: "list_issue_statuses", args: { team: chip.team } }] : []),
       ]);
       if (got.length > types.length) {
@@ -209,7 +186,7 @@ export function linearTracker() {
     },
 
     // Reads the issue again so the description is current, then gives claude-new's props: the issue's
-    // own branch name, the chip's repo; model and effort are picked in the dialog.
+    // own branch name, the board's repo; model and effort are picked in the dialog.
     async start(chip, item) {
       let fresh = item;
       try { fresh = { ...item, ...card(chip, await linear("get_issue", { id: item.id })) }; } catch {}  // the card's copy will do
@@ -220,7 +197,7 @@ export function linearTracker() {
         // The session moves its own issue from here on (the linear-ticket Claude skill reads this line).
         `Linear ticket: issue ${item.ref}, team ${item.teamKey}. Keep its status updated as the work progresses (linear-ticket skill).`];
       const message = lines.filter((l, i) => l !== "" || (i > 0 && lines[i - 1] !== "")).join("\n").trim();
-      const target = await targetOf({ main: chip.repo });
+      const target = await targetOf(chip.repo);
       return { ...target, message, label: item.label, ...(fresh.branch ? { branch: fresh.branch } : {}),
         ref: { tracker: "linear", issue: item.id, identifier: item.ref, team: item.team, assigned: fresh.assigned } };
     },
@@ -233,7 +210,7 @@ export function linearTracker() {
       await linear("save_issue", { id: ref.issue, state: started.id, ...(ref.assigned ? {} : { assignee: "me" }) });
     },
 
-    // issue-board-edit's props for a new issue in column (the chip's team, that state), or for editing item.
+    // issue-board-edit's props for a new issue in column (the board's team, that state), or for editing item.
     editProps(chip, column, item, mode) {
       const state = (statuses.get(chip.team) ?? []).find(s => lower(s.name) === column.id);
       return { tracker: "linear", mode,

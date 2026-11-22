@@ -2,6 +2,8 @@
 // bucket of the chip's kanban view. Cards open in the browser, move to another bucket, or start
 // a Claude session (claude-new) with the ticket as its first message; confirming that dialog moves
 // the card to Plan (Plan mode ticked) or Doing and switches the `center` stack back to the terminals.
+// The message ends with a "Vikunja ticket:" line (task, project, view ids): the session's vikunja-ticket
+// skill (~/.claude/skills) moves the card on from there, through the vikunja MCP server.
 // "+" in a column and Edit on a card open vikunja-task, which saves and pings the board to refresh.
 // Props { url, project }: the Vikunja instance and the parent project. Talks to Vikunja's own MCP
 // server (<url>/api/v2/mcp) through ./vikunja.js.
@@ -149,7 +151,9 @@ export default class VikunjaBoard extends View {
       const labels = (fresh.labels ?? []).map(l => l.title).filter(Boolean);
       const lines = [`Vikunja task ${fresh.identifier || `#${fresh.index}`}: ${fresh.title}`, "",
         (fresh.description ?? "").trim(), "",
-        ...(labels.length ? [`Labels: ${labels.join(", ")}`] : []), `${this.url}/tasks/${task.id}`];
+        ...(labels.length ? [`Labels: ${labels.join(", ")}`] : []), `${this.url}/tasks/${task.id}`, "",
+        // The session moves its own card from here on (the vikunja-ticket Claude skill reads these ids).
+        `Vikunja ticket: task ${task.id}, project ${project?.id}, kanban view ${project?.view}. Keep its card updated as the work progresses (vikunja-ticket skill).`];
       const message = lines.filter((l, i) => l !== "" || (i > 0 && lines[i - 1] !== "")).join("\n").trim();
       openOverlay({ mod: "claude-new", kind: "dialog", width: 560, props: {
         message, plan: !named(bucket, "plan"), started: STARTED,

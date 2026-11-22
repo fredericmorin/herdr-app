@@ -7,7 +7,8 @@
 // or without one a new space there.
 // Props { message } fill in the first message (the Vikunja board's Start).
 // The Plan mode checkbox starts Claude with `--permission-mode plan`; props { plan: true } tick it.
-// Props { started, ref }: on Start (not Cancel), shared state `started` gets { plan, at, ref } so the opener can react.
+// Props { started, ref }: on Start (not Cancel), shared state `started` gets { plan, at, ref } so the opener can react;
+// with ref (the Board) and Plan mode ticked, the message also asks Claude to ask clarifying questions first.
 // The branch is required for a worktree; `claude -p` suggests one from the prompt while it's
 // typed (<user>_<words_with_underscores>, user from `whoami`), until the branch is edited by hand.
 // The message is multi-line: Enter adds a line, Cmd+Enter starts (Enter too, in the branch field), Esc cancels.
@@ -24,6 +25,9 @@ const NAMING = "Name a git branch after the deliverable this task asks for: what
   "never with a verb for a step (investigate, explore, plan, review, check). " +
   "Example: \"create new mod but investigate first\" -> create_new_mod. " +
   "Reply with only the name: 2 to 5 lowercase words joined by underscores, at most 40 characters, no prefix, no quotes.";
+
+// Added to a Board start's message when Plan mode is ticked.
+const PLAN_ASK = "Before doing this, ask important clarifying questions to understand my goals.";
 
 // The model's reply as a slug: its last line, lowercase words joined by "_".
 function toSlug(text) {
@@ -120,7 +124,7 @@ export default class ClaudeNew extends View {
   }
 
   submit(cx) {
-    const prompt = this.input.value().trim();
+    let prompt = this.input.value().trim();
     const branch = this.branch.value().trim();
     if (this.worktree && !branch) {
       // A name for this prompt is on its way: start once it's in.
@@ -133,6 +137,8 @@ export default class ClaudeNew extends View {
     const p = props();
     closeOverlay(p.overlay);
     if (p.started) setShared(p.started, { plan: this.plan, at: Date.now(), ref: p.ref });
+    // A Board start in Plan mode asks before planning.
+    if (p.ref && this.plan) prompt = `${prompt}\n\n${PLAN_ASK}`.trim();
     // `--` keeps a prompt that starts with "-" from being read as an option, so options go before it.
     const argv = ["claude", ...(this.plan ? ["--permission-mode", "plan"] : []), ...(prompt ? ["--", prompt] : [])];
     if (!this.worktree) {

@@ -9,7 +9,7 @@
 // `vikunja-board.new` (cmd-n through the keybind mod, while the board shows) is the To-Do column's "+".
 // Start labels the session's terminal vikunja.task=<id> (claude-new's label prop): while Claude runs
 // there, the card shows that session's space, tab and status, a click goes to it, and Start gives way
-// to a Vikunja button. A click on a column's title folds it to a strip (Done starts folded).
+// to a Vikunja button. Done shows its 10 most recently done cards; a Show all toggle under them lists the rest below it.
 // Props { url, project }: the Vikunja instance and the parent project. Talks to Vikunja's own MCP
 // server (<url>/api/v2/mcp) through ./vikunja.js.
 import { View, div, svg } from "gpui-kit";
@@ -28,6 +28,8 @@ const named = (bucket, title) => (bucket?.title ?? "").trim().toLowerCase() === 
 // New tasks start in To-Do (or another early column), never mid-work.
 const NO_ADD = ["plan", "doing", "done"];
 const COLUMN = 272;
+// Done cards shown before Show all.
+const RECENT = 10;
 
 function ago(ms) {
   const m = Math.floor((Date.now() - ms) / 60_000);
@@ -96,6 +98,7 @@ export default class VikunjaBoard extends View {
     this.error = "";
     this.noToken = false;
     this.moving = null;  // the task whose Move row is open
+    this.showAll = false;  // Done lists every card, not only the RECENT latest
     this.readOnly = false;
     // The last confirmed start handled. A copy with nothing stored takes the current one as handled,
     // so it never replays an old start.
@@ -170,6 +173,7 @@ export default class VikunjaBoard extends View {
   select(id, cx) {
     this.selected = id;
     this.moving = null;
+    this.showAll = false;
     this.buckets = [];
     localStorage.setItem("project", String(id));
     this.refresh(cx);
@@ -235,17 +239,6 @@ export default class VikunjaBoard extends View {
     const bucket = this.buckets.find(b => named(b, title.toLowerCase()));
     if (!bucket) { this.error = `No "${title}" bucket in this project's board.`; return; }
     this.move({ id: s.ref.task }, bucket, cx);
-  }
-
-  // A column's fold, as last clicked in this project; Done starts folded.
-  folded(bucket) {
-    const saved = localStorage.getItem(`fold:${this.selected}:${bucket.id}`);
-    return saved == null ? named(bucket, "done") : saved === "1";
-  }
-
-  fold(bucket, cx) {
-    localStorage.setItem(`fold:${this.selected}:${bucket.id}`, this.folded(bucket) ? "0" : "1");
-    cx.notify();
   }
 
   // Each task's live Claude session, from the label Start put on its terminal: task id ->
@@ -354,23 +347,28 @@ export default class VikunjaBoard extends View {
       const tasks = bucket.tasks ?? [];
       const count = bucket.limit > 0 ? `${tasks.length}/${bucket.limit}` : String(tasks.length);
       const countColor = bucket.limit > 0 && tasks.length > bucket.limit ? t.blocked : t.dim;
-      // Folded: a strip with the count and the title's letters stacked; a click opens it again.
-      if (this.folded(bucket)) {
-        return v_flex().id(`bucket-${bucket.id}`).w(40).flex_none().h_full().py(8).gap(6).items_center().rounded(8)
-          .bg(t.chrome).hover(s => s.bg(t.hover)).on_click((_e, cx) => this.fold(bucket, cx))
-          .child(div().text_size(11).text_color(countColor).child(count))
-          .child(v_flex().items_center()
-            .children(Array.from(bucket.title).map(c => div().text_size(12.5).font_semibold().text_color(t.muted).child(c))));
+      // Done: newest done first, the RECENT latest, then the toggle, then (Show all) the rest below it.
+      let shown = tasks;
+      let hidden = 0;
+      if (named(bucket, "done")) {
+        const doneAt = (task) => Date.parse(task.done_at?.startsWith("0001") ? task.updated : task.done_at) || 0;
+        shown = [...tasks].sort((a, b) => doneAt(b) - doneAt(a));
+        hidden = Math.max(0, shown.length - RECENT);
+        if (!this.showAll) shown = shown.slice(0, RECENT);
       }
       return v_flex().id(`bucket-${bucket.id}`).w(COLUMN).flex_none().h_full().min_h(0).gap(8)
         .child(h_flex().gap(8).items_center().px(2)
-          .child(div().id(`fold-${bucket.id}`).font_semibold().text_size(12.5).text_color(t.foreground)
-            .hover(s => s.text_color(t.accent)).on_click((_e, cx) => this.fold(bucket, cx)).child(bucket.title))
+          .child(div().font_semibold().text_size(12.5).text_color(t.foreground).child(bucket.title))
           .child(div().text_size(11).text_color(countColor).child(count))
           .child(div().flex_1())
           .when(!this.readOnly && !NO_ADD.some(n => named(bucket, n)), el => el.child(button(`new-${bucket.id}`, "+", () => this.editTask("new", bucket, null)))))
         .child(v_flex().id(`cards-${bucket.id}`).flex_1().min_h(0).gap(8).overflow_y_scrollbar()
-          .children(tasks.map(task => card(task, bucket)))
+          .children(shown.slice(0, RECENT).map(task => card(task, bucket)))
+          .when(hidden > 0, el => el.child(div().id(`more-${bucket.id}`).h(28).flex_none().flex().items_center().justify_center()
+            .rounded(6).text_size(11.5).text_color(t.muted).hover(s => s.bg(t.hover).text_color(t.foreground))
+            .on_click((_e, cx) => { this.showAll = !this.showAll; cx.notify(); })
+            .child(this.showAll ? "Show fewer" : `Show all (${hidden} more)`)))
+          .children(shown.slice(RECENT).map(task => card(task, bucket)))
           .when(tasks.length === 0, el => el.child(div().p(10).text_size(11.5).text_color(t.dim).child("Nothing here"))));
     };
 

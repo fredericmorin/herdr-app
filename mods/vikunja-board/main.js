@@ -9,7 +9,7 @@
 // `vikunja-board.new` (cmd-n through the keybind mod, while the board shows) is the To-Do column's "+".
 // Start labels the session's terminal vikunja.task=<id> (claude-new's label prop): while Claude runs
 // there, the card shows that session's space, tab and status, a click goes to it, and Start gives way
-// to a Vikunja button. Done shows its 10 most recently done cards; a Show all toggle under them lists the rest below it.
+// to a Vikunja button. A change in those sessions' statuses refreshes the board. Done shows its 10 most recently done cards; a Show all toggle under them lists the rest below it.
 // Props { url, project }: the Vikunja instance and the parent project. Talks to Vikunja's own MCP
 // server (<url>/api/v2/mcp) through ./vikunja.js.
 import { View, div, svg } from "gpui-kit";
@@ -32,8 +32,10 @@ const COLUMN = 272;
 const RECENT = 10;
 
 function ago(ms) {
-  const m = Math.floor((Date.now() - ms) / 60_000);
-  return m < 1 ? "just now" : m < 60 ? `${m}m ago` : `${Math.floor(m / 60)}h ago`;
+  const sec = Math.max(0, Math.floor((Date.now() - ms) / 1000));
+  if (sec < 60) return `${sec}s ago`;
+  const m = Math.floor(sec / 60);
+  return m < 60 ? `${m}m ago` : `${Math.floor(m / 60)}h ago`;
 }
 
 function findNode(node, id) {
@@ -113,6 +115,8 @@ export default class VikunjaBoard extends View {
       }
     });
     cx.timer.every(REFRESH, (cx) => this.refresh(cx));
+    // Redraws the "synced …s ago" label each second.
+    cx.timer.every(1000, (cx) => { if (this.syncedAt) cx.notify(); });
     this.refresh(cx);
   }
 
@@ -301,6 +305,12 @@ export default class VikunjaBoard extends View {
     };
 
     const sessions = this.sessions();
+    // A card's session changing status (or starting, or ending) is when it likely moved its card: reload then, not at the next minute.
+    const sessionState = [...sessions].map(([id, s]) => `${id}:${s.status}`).sort().join(",");
+    if (this.sessionState !== undefined && sessionState !== this.sessionState && !checking()) {
+      cx.timer.after(0, (cx) => this.refresh(cx));
+    }
+    this.sessionState = sessionState;
     const mark = (status) => status === "working"
       ? svg("mods/workspace-chrome/spinner.svg").size(10).flex_none().text_color(t.working).spin(900)
       : div().size(8).flex_none().rounded(4).bg(t[status] ?? t.dim);

@@ -9,7 +9,7 @@
 // server (<url>/api/v2/mcp) through ./vikunja.js.
 import { View, div, svg } from "gpui-kit";
 import { v_flex, h_flex } from "gpui-base";
-import { props, theme, exec, openOverlay, appHome, checking, shared, layout, run } from "herdr";
+import { props, theme, exec, openOverlay, appHome, checking, shared, layout, run, spaces, panes } from "herdr";
 import { mcp } from "./vikunja.js";
 
 const REFRESH = 60_000;
@@ -28,6 +28,39 @@ function findNode(node, id) {
     if (found) return found;
   }
   return null;
+}
+
+// The repo a folder belongs to: its main checkout, and whether the folder is a linked worktree.
+// null outside git. Same as Herdr's worktree dialog's repoOf (a mod can't import another's files).
+async function repoOf(folder, on) {
+  const git = async (args) => {
+    const r = await exec("git", args, { cwd: folder, on });
+    return { ok: r.code === 0, out: (r.stdout ?? "").trim() };
+  };
+  const top = await git(["rev-parse", "--show-toplevel"]);
+  const common = await git(["rev-parse", "--path-format=absolute", "--git-common-dir"]);
+  if (!top.ok || !common.ok) return null;
+  const main = common.out.endsWith("/.git") ? common.out.slice(0, -5) : common.out;
+  return { top: top.out, main, linked: main !== top.out };
+}
+
+// Where a Vikunja project's sessions start: the space named like it whose first terminal is in a
+// repo's main checkout, as { space, folder }. Only worktree spaces of it: { folder } (its main
+// checkout, no space). None: null (claude-new then uses the focused space).
+async function targetOf(title) {
+  const name = (title ?? "").trim().toLowerCase();
+  const ps = panes();
+  let fallback = null;
+  for (const s of spaces()) {
+    if ((s.name ?? "").trim().toLowerCase() !== name) continue;
+    const tabs = new Set((s.tabs ?? []).map((c) => c.id));
+    const at = ps.find((p) => tabs.has(p.tab) && p.cwd)?.cwd || s.folder;
+    const repo = at ? await repoOf(at, s.machine ?? undefined) : null;
+    if (!repo) continue;
+    if (!repo.linked) return { space: s.id, folder: repo.top };
+    fallback ??= { folder: repo.main };
+  }
+  return fallback;
 }
 
 // "0001-01-01T00:00:00Z" means no due date.
@@ -140,6 +173,7 @@ export default class VikunjaBoard extends View {
 
   // Reads the task again so the description is current, then opens claude-new with it. Plan mode is
   // ticked unless the card is already in Plan (planning done: the next start is the work).
+  // The session goes to the project's repo and space (matched by name), not the focused one.
   start(task, bucket, cx) {
     const project = this.projects.find(p => p.id === this.selected);
     cx.spawn(async () => {
@@ -154,9 +188,10 @@ export default class VikunjaBoard extends View {
         ...(labels.length ? [`Labels: ${labels.join(", ")}`] : []), `${this.url}/tasks/${task.id}`, "",
         // The session moves its own card from here on (the vikunja-ticket Claude skill reads these ids).
         `Vikunja ticket: task ${task.id}, project ${project?.id}, kanban view ${project?.view}. Keep its card updated as the work progresses (vikunja-ticket skill).`];
+      const target = await targetOf(project?.title);
       const message = lines.filter((l, i) => l !== "" || (i > 0 && lines[i - 1] !== "")).join("\n").trim();
       openOverlay({ mod: "claude-new", kind: "dialog", width: 560, props: {
-        message, plan: !named(bucket, "plan"), started: STARTED,
+        ...(target ?? {}), message, plan: !named(bucket, "plan"), started: STARTED,
         ref: { task: task.id, project: project?.id, view: project?.view } } });
     });
   }

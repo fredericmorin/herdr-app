@@ -2,7 +2,9 @@
 // either in a new worktree space of the focused terminal's repo (on a new branch from origin's
 // default branch, made by the worktree dialog so the project's setup runs; same as the herdr-new
 // Claude skill) or in a new tab of the focused space, in the focused terminal's folder.
-// Props { space, folder } (New worktree in the space menu and the + menu) target that space instead of the focused one.
+// Props { space, folder } (New worktree in the space menu and the + menu) target that space instead of the focused one;
+// { folder } alone (the Board, when the repo's main checkout has no space) targets that folder: a worktree of it,
+// or without one a new space there.
 // Props { message } fill in the first message (the Vikunja board's Start).
 // The Plan mode checkbox starts Claude with `--permission-mode plan`; props { plan: true } tick it.
 // Props { started, ref }: on Start (not Cancel), shared state `started` gets { plan, at, ref } so the opener can react.
@@ -33,7 +35,7 @@ export default class ClaudeNew extends View {
   init(_props, cx) {
     // Read now: the dialog takes the keyboard, the target is what was focused before it.
     const p = props();
-    this.target = p?.space ? { space: p.space, cwd: p.folder } : focused();
+    this.target = p?.space || p?.folder ? { space: p.space, cwd: p.folder } : focused();
     this.worktree = true;
     this.plan = p?.plan === true;
     this.seq = 0;        // bumped on every prompt change: only the newest naming counts
@@ -134,7 +136,8 @@ export default class ClaudeNew extends View {
     // `--` keeps a prompt that starts with "-" from being read as an option, so options go before it.
     const argv = ["claude", ...(this.plan ? ["--permission-mode", "plan"] : []), ...(prompt ? ["--", prompt] : [])];
     if (!this.worktree) {
-      run("tab.new", { space: this.target?.space, folder: this.target?.cwd, argv });
+      if (!this.target?.space && this.target?.cwd) run("space.new", { folder: this.target.cwd, argv });
+      else run("tab.new", { space: this.target?.space, folder: this.target?.cwd, argv });
       return;
     }
     const request = { space: this.target?.space, folder: this.target?.cwd, argv, branch };

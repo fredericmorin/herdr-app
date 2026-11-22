@@ -5,7 +5,7 @@
 // The message ends with a "Vikunja ticket:" line (task, project, view ids): the session's vikunja-ticket
 // skill (~/.claude/skills) moves the card on from there, through the vikunja MCP server.
 // The card's model/ and effort/ labels pick claude-new's Model and Effort (Default without them).
-// "+" in a column and Edit on a card open vikunja-task, which saves and pings the board to refresh.
+// "+" in a column (not Plan, Doing or Done) and Edit on a card open vikunja-task, which saves and pings the board to refresh.
 // Start labels the session's terminal vikunja.task=<id> (claude-new's label prop): while Claude runs
 // there, the card shows that session's space, tab and status, a click goes to it, and Start gives way
 // to a Vikunja button. A click on a column's title folds it to a strip (Done starts folded).
@@ -24,6 +24,8 @@ const CHANGED = "vikunja.changed";
 // The terminal label Start puts on a card's session: the task id.
 const TASK = "vikunja.task";
 const named = (bucket, title) => (bucket?.title ?? "").trim().toLowerCase() === title;
+// New tasks start in To-Do (or another early column), never mid-work.
+const NO_ADD = ["plan", "doing", "done"];
 const COLUMN = 272;
 
 function ago(ms) {
@@ -352,7 +354,7 @@ export default class VikunjaBoard extends View {
             .hover(s => s.text_color(t.accent)).on_click((_e, cx) => this.fold(bucket, cx)).child(bucket.title))
           .child(div().text_size(11).text_color(countColor).child(count))
           .child(div().flex_1())
-          .when(!this.readOnly, el => el.child(button(`new-${bucket.id}`, "+", () => this.editTask("new", bucket, null)))))
+          .when(!this.readOnly && !NO_ADD.some(n => named(bucket, n)), el => el.child(button(`new-${bucket.id}`, "+", () => this.editTask("new", bucket, null)))))
         .child(v_flex().id(`cards-${bucket.id}`).flex_1().min_h(0).gap(8).overflow_y_scrollbar()
           .children(tasks.map(task => card(task, bucket)))
           .when(tasks.length === 0, el => el.child(div().p(10).text_size(11.5).text_color(t.dim).child("Nothing here"))));

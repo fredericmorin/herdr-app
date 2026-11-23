@@ -20,10 +20,10 @@ Made on top of: nothing. It patches only `frame/settings/main.js` in place (`to`
   - Claude sessions: worktree and Plan mode for *Board Start* and for *New session*.
   - Board (per project): *None*, *Vikunja* or *Linear*.
     - Vikunja: a project list from Vikunja's MCP `projects_list` (curl with `.vikunja-token`, the same
-      call as `mods/issue-board/vikunja.js`), or an id field if that fails.
+      call as `mods/status-hub/board/vikunja.js`), or an id field if that fails.
     - Linear: scope (My issues, Team cycle, Project, View), a team list (`list_teams`), and a project or
       view list (`list_projects` / `list_custom_views`, by team) plus a URL field, then an optional title.
-      Calls go through `node mods/issue-board/linear-mcp.mjs call`, signed in from the Board.
+      Calls go through `node mods/status-hub/board/linear-mcp.mjs call`, signed in from the Board.
       A choice that isn't complete yet (a cycle with no team, a project with no URL) stays a draft
       on screen and isn't written.
 - Yes/no settings are `Default (on|off)` / `On` / `Off`. *Default* removes the key. Its label shows what
@@ -61,7 +61,7 @@ equivalent code now lives.
   - `person`, settings.json parsed (for `worktrees.directory`, the Folder row's default).
 - `herdr-app check` of `frame/settings` with both files must pass: the patcher checks the whole
   screen folder, copied from Herdr's with the patched `main.js` and our files over it.
-- Outside Settings: `mods/issue-board/linear-mcp.mjs` (`call <tool> <json>`, printing one JSON line
+- Outside Settings: `mods/status-hub/board/linear-mcp.mjs` (`call <tool> <json>`, printing one JSON line
   `{ok, value}` or `{ok: false, status, error}`), Vikunja's MCP at `https://todo.endor.one/api/v2/mcp`,
   and the shapes of `projects.json` that `mods/my-worktree`, `mods/claude-new` and `mods/issue-board`
   read.

@@ -1,34 +1,32 @@
-// The board's edit dialog: a new item in a column (the "+"), or an item's title and description (Edit),
-// saved through the board's tracker. The board opens issue-board again with props { edit: { tracker, url,
-// column: {id, title}, task: {id, ref, title, description, labels: [{id, title}]} | null, … } } (the rest
-// is the tracker's editProps). Descriptions are read and written as Markdown. A tracker with settings
-// (Vikunja) adds Model and Effort rows: the task's model/ and effort/ labels, which the board's Start
-// hands to claude-new. After a save, shared CHANGED gets Date.now() so the board refreshes; on an error
-// the dialog stays open with what was typed. Enter in the title or Cmd+Enter saves, Esc cancels.
+// The board's edit dialog: a new item in a column (the "+"), or an item's title and description (Edit).
+// The board opens issue-board again with props { edit: { key, tracker, noun, column: {id, title},
+// task: {id, ref, title, description, labels: [{id, title}], model, effort} | null, settings } }.
+// The status hub reads and saves it (./requests.js: task.read, task.save; answers in shared
+// `status.replies[id]`) and refreshes the board after a save. Descriptions are Markdown. A tracker with
+// settings ({ models, efforts }: Vikunja) adds Model and Effort rows: the task's model/ and effort/ labels,
+// which the board's Start hands to claude-new. On an error the dialog stays open with what was typed.
+// Enter in the title or Cmd+Enter saves, Esc cancels.
 import { div } from "gpui-kit";
 import { v_flex, h_flex, InputState, Input, TextareaState, Textarea } from "gpui-base";
-import { props, closeOverlay, theme, checking, setShared } from "herdr";
-import { vikunjaTracker } from "./tracker-vikunja.js";
-import { linearTracker } from "./tracker-linear.js";
-
-// Written after a save; the board refreshes when it changes.
-export const CHANGED = "issue-board.changed";
+import { props, closeOverlay, theme, checking, shared } from "herdr";
+import { request } from "./requests.js";
 
 const withOwn = (list, value) => (!value || list.includes(value) ? list : [...list, value]);
-// A tracker without settings: no model or effort.
-const NONE = () => ({ model: "", effort: "" });
 
 export class EditDialog {
   init(_props, cx) {
     const edit = props()?.edit ?? {};
     this.edit = edit;
-    this.tracker = edit.tracker === "linear" ? linearTracker() : vikunjaTracker({ url: edit.url });
-    this.settingsOf = this.tracker.settings?.of ?? NONE;
+    this.settings = edit.settings ?? null;
     this.taskId = edit.task?.id ?? null;  // a new item's id once it's made: saving again edits it
     this.labels = edit.task?.labels ?? [];  // the task's labels as last read: a save keeps all but model/effort
-    ({ model: this.model, effort: this.effort } = this.settingsOf(this.labels));
+    // The model and effort as last read, to tell whether the rows were touched.
+    this.read = { model: edit.task?.model ?? "", effort: edit.task?.effort ?? "" };
+    ({ model: this.model, effort: this.effort } = this.read);
     this.error = "";
     this.saving = false;
+    this.reading = null;  // the pending task.read request's id
+    this.saveId = null;   // the pending task.save request's id
     this.title = InputState.new({ placeholder: "Title" });
     this.description = TextareaState.new({ placeholder: "Description (Markdown, optional)", rows: 6 });
     this.description.set_auto_grow(6, 18);
@@ -55,28 +53,25 @@ export class EditDialog {
       { keystroke: "tab", action: "issue_board_edit_next", context: "IssueBoardEdit" },
       { keystroke: "shift-tab", action: "issue_board_edit_prev", context: "IssueBoardEdit" },
     ]);
-    if (edit.task && !checking()) this.readFresh(cx);
+    if (edit.task && !checking()) this.reading = request("task.read", { key: edit.key, id: edit.task.id });
   }
 
-  // The card's copy can be a minute old: read the task again, but only replace fields that still
-  // hold the card's copy. Compares the values themselves, so it doesn't depend on when change events fire.
-  readFresh(cx) {
+  // The card's copy can be a minute old: the hub reads the task again (task.read), and only fields that
+  // still hold the card's copy are replaced. Compares the values themselves, so it doesn't depend on when
+  // change events fire. A failed read keeps the card's copy.
+  applyRead(r) {
     const task = this.edit.task;
-    cx.spawn(async (cx) => {
-      try {
-        const fresh = await this.tracker.read(task.id);
-        const was = this.settingsOf(this.labels);
-        const rowsUntouched = this.model === was.model && this.effort === was.effort;
-        this.labels = fresh.labels ?? [];
-        if (rowsUntouched) ({ model: this.model, effort: this.effort } = this.settingsOf(this.labels));
-        const untouched = this.title.value() === (task.title ?? "") && this.description.value() === (task.description ?? "");
-        if (untouched) {
-          this.title.set_value(fresh.title ?? "");
-          this.description.set_value(fresh.description ?? "");
-        }
-        cx.notify();
-      } catch {}  // keep the card's copy
-    });
+    if (!r.ok) return;
+    const fresh = r.value;
+    const rowsUntouched = this.model === this.read.model && this.effort === this.read.effort;
+    this.labels = fresh.labels ?? [];
+    this.read = { model: fresh.model ?? "", effort: fresh.effort ?? "" };
+    if (rowsUntouched) ({ model: this.model, effort: this.effort } = this.read);
+    const untouched = this.title.value() === (task.title ?? "") && this.description.value() === (task.description ?? "");
+    if (untouched) {
+      this.title.set_value(fresh.title ?? "");
+      this.description.set_value(fresh.description ?? "");
+    }
   }
 
   save(cx) {
@@ -92,20 +87,41 @@ export class EditDialog {
       model: this.model, effort: this.effort };
     this.saving = true;
     this.error = "";
+    const { key, column } = this.edit;
+    this.saveId = request("task.save", { key, edit: { column }, form });
     cx.notify();
-    cx.spawn(async (cx) => {
-      try {
-        // From the moment it's made, this dialog edits the new item: saving again after an error can't make a second one.
-        await this.tracker.save(this.edit, form, (id) => { this.taskId = id; this.labels = []; });
-      } catch (e) {
-        this.saving = false;
-        this.error = this.tracker.problem(e, "save it", true).message;
-        cx.notify();
-        return;
-      }
-      setShared(CHANGED, Date.now());
+  }
+
+  // The hub's answer to task.save: close, or show the error and keep what was typed. A new item made
+  // before the error is edited by the next save, so a retry can't make a second one.
+  applySave(r) {
+    if (r.ok) {
       closeOverlay(props().overlay);
-    });
+      return;
+    }
+    this.saving = false;
+    this.error = r.error ?? "Couldn't save it.";
+    if (r.id && !this.taskId) {
+      this.taskId = r.id;
+      this.labels = [];
+      this.read = { model: "", effort: "" };
+    }
+  }
+
+  // Replies come through shared state, which re-renders this copy: take ours, once. Unknown ids are
+  // other dialogs'; the hub prunes them. Applied by a timer: render can't change inputs or close itself.
+  takeReplies(cx) {
+    const replies = shared("status.replies") ?? {};
+    if (this.reading && replies[this.reading]) {
+      const r = replies[this.reading];
+      this.reading = null;
+      cx.timer.after(0, (cx) => { this.applyRead(r); cx.notify(); });
+    }
+    if (this.saveId && replies[this.saveId]) {
+      const r = replies[this.saveId];
+      this.saveId = null;
+      cx.timer.after(0, (cx) => { this.applySave(r); cx.notify(); });
+    }
   }
 
   key(e, cx) {
@@ -113,7 +129,7 @@ export class EditDialog {
   }
 
   cycle(step, cx) {
-    const order = this.tracker.settings ? ["title", "description", "model", "effort"] : ["title", "description"];
+    const order = this.settings ? ["title", "description", "model", "effort"] : ["title", "description"];
     this.focusAt(order[(order.indexOf(this.at) + step + order.length) % order.length], cx);
   }
 
@@ -126,11 +142,12 @@ export class EditDialog {
     cx.notify();
   }
 
-  render() {
+  render(cx) {
+    this.takeReplies(cx);
     const t = theme();
     const { task, column } = this.edit;
-    const noun = this.tracker.noun;
-    const settings = this.tracker.settings;
+    const noun = this.edit.noun ?? "item";
+    const settings = this.settings;
     const button = (id, text, primary, action) => h_flex().id(id).h(32).px(14).items_center().rounded(8)
       .border_1().border_color(primary ? t.solid : t.input).bg(primary ? t.solid : t.raised)
       .text_color(primary ? t.solid_foreground : t.foreground).text_size(12.5).font_medium().cursor_pointer()

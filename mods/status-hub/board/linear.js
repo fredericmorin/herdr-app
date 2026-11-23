@@ -7,7 +7,7 @@ export class LinearError extends Error {
 }
 
 async function helper(args, timeout = 60_000) {
-  const r = await exec("node", [`${appHome()}/mods/issue-board/linear-mcp.mjs`, ...args], { timeout });
+  const r = await exec("node", [`${appHome()}/mods/status-hub/board/linear-mcp.mjs`, ...args], { timeout });
   let out;
   try {
     out = JSON.parse((r.stdout ?? "").trim().split("\n").pop());

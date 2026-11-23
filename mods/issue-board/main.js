@@ -1,35 +1,26 @@
-// The focused space's issue board: its repo's projects.json "board" (./config.js), a Vikunja project
-// (./tracker-vikunja.js) or one Linear scope (./tracker-linear.js); a worktree space shows its repo's.
-// Going to another space shows that space's board; a repo without one says how to add it. The columns
-// are the project's kanban buckets or the Linear teams' workflow states. The two trackers share one
-// interface, so this file only draws columns and cards and hands actions to the board's tracker.
-// Cards open in the browser, move to another column, or start a Claude session (claude-new) with the ticket
-// as its first message; confirming that dialog lets the tracker move the card (Vikunja: Plan or Doing; Linear:
-// In Progress, assigned to you if nobody has it) and shows the terminals again.
+// The focused space's issue board, drawn from shared `status.board`: the status hub (mods/status-hub,
+// board.js there) resolves the board from projects.json, loads it, and makes every Vikunja and Linear call.
+// This mod only draws columns and cards and asks the hub for actions through `status.requests`
+// (./requests.js): refresh, move, start, sign-in; the edit dialog's read and save.
+// Cards open in the browser, move to another column, or start a Claude session: the hub reads the item and
+// opens claude-new with the ticket as its first message; confirming there has the hub move the card
+// (Vikunja: Plan or Doing; Linear: In Progress), and this mod shows the terminals again.
 // The message ends with a "Vikunja ticket:" or "Linear ticket:" line: the session's vikunja-ticket or
 // linear-ticket skill (~/.claude/skills) moves the card on from there.
-// A Vikunja card's model/ and effort/ labels pick claude-new's Model and Effort (Default without them).
-// "+" in a column that takes new items, and Edit on a card, open this mod again as a dialog (./edit.js),
-// which saves through the tracker and pings the board to refresh.
+// "+" in a column that takes new items, and Edit on a card, open this mod again as a dialog (./edit.js).
 // `issue-board.new` (cmd-n through the keybind mod, while the board shows) is the To-Do column's "+".
-// Start labels the session's terminal (vikunja.task=<id>, linear.issue=<ID>; claude-new's label prop): while
-// Claude runs there, the card shows that session's space, tab and status, a click goes to it, and Start gives
-// way to a button that opens the item. A session that stops working, or ends, refreshes the board.
+// Start labels the session's terminal (vikunja.task=<id>, linear.issue=<ID>): while Claude runs there, the
+// card shows that session's space, tab and status, a click goes to it, and Start gives way to a button
+// that opens the item.
 // A done column shows its 10 most recently done cards; a Show all toggle under them lists the rest below it.
-// Props { url }: the Vikunja instance. Props { edit }: the edit dialog (./edit.js).
+// Props { url }: read by the hub (the Vikunja instance). Props { edit }: the edit dialog (./edit.js).
 import { View, div, svg } from "gpui-kit";
 import { v_flex, h_flex } from "gpui-base";
-import { props, theme, nextCommand, exec, openOverlay, appHome, checking, shared, layout, run, spaces, agents, terminals, focused } from "herdr";
-import { boardEntry, tilde } from "./config.js";
-import { repoOfSpace } from "./target.js";
-import { vikunjaTracker } from "./tracker-vikunja.js";
-import { linearTracker } from "./tracker-linear.js";
-import { EditDialog, CHANGED } from "./edit.js";
+import { props, theme, nextCommand, exec, openOverlay, appHome, home, checking, shared, layout, run, spaces, agents, terminals, focused } from "herdr";
+import { EditDialog } from "./edit.js";
+import { request } from "./requests.js";
 
-const REFRESH = 60_000;
-// How long a rate-limited tracker's boards wait before asking again.
-const PAUSE = 5 * 60_000;
-// claude-new writes { plan, at, ref } here when Start is confirmed; the board then has ref's tracker move it.
+// claude-new writes { plan, at, ref } here when Start is confirmed; the hub moves the card, this mod shows the terminals.
 const STARTED = "issue-board.started";
 const COLUMN = 272;
 // Done cards shown before Show all.
@@ -62,28 +53,18 @@ function due(date) {
   return { text: d.toLocaleDateString(undefined, { month: "short", day: "numeric" }), late: d.getTime() < Date.now() };
 }
 
+// A path as projects.json writes it: ~/… under home.
+const tilde = (path) => (path.startsWith(`${home()}/`) ? `~${path.slice(home().length)}` : path);
+// A column as a request sends it: without its cards.
+const bare = ({ cards, ...column }) => column;
+
 class Board {
   init(_props, cx) {
-    const p = props() ?? {};
-    this.url = (p.url ?? "https://todo.endor.one").replace(/\/+$/, "");
-    this.trackers = { vikunja: vikunjaTracker({ url: this.url }), linear: linearTracker() };
-    this.repo = undefined;  // the focused space's repo (its main checkout), null outside git; undefined until resolved
-    this.board = null;      // the repo's board, null without one
-    this.tracker = null;    // the board's tracker
-    this.columns = [];
-    this.loading = false;
-    this.again = false;     // a refresh asked for mid-load: runs once this one ends
-    this.error = "";        // the board's last load or action error
-    this.boardError = "";   // why projects.json's board for this repo isn't usable
-    this.setup = {};        // tracker name -> true when it needs a token or a sign-in
-    this.readOnly = {};     // tracker name -> true once a write was refused
-    this.pausedUntil = {};  // tracker name -> when a rate-limited tracker may load again
-    this.signingIn = false;
-    this.syncedAt = null;
     this.handle = cx.focus_handle();
+    this.key = null;        // the board the Move row and Show all belong to
     this.moving = null;     // the card whose Move row is open
     this.showAll = false;   // a done column lists every card, not only the RECENT latest
-    this.watched = null;    // what the last render's watch saw
+    this.space = undefined; // the focused space at the last render
     // The last confirmed start handled: a new copy takes the current one as handled, so it never replays an old start.
     this.lastStarted = shared(STARTED)?.at ?? 0;
     if (checking()) return;
@@ -92,156 +73,33 @@ class Board {
         if (await nextCommand() === "new") this.newTask();
       }
     });
-    cx.timer.every(REFRESH, (cx) => this.refresh(cx));
     // Redraws the "synced …s ago" label each second.
-    cx.timer.every(1000, (cx) => { if (this.syncedAt) cx.notify(); });
-    this.refresh(cx);
+    cx.timer.every(1000, (cx) => { if (shared("status.board")?.syncedAt) cx.notify(); });
   }
 
-  // The focused space's board from projects.json: sets repo, board, tracker and boardError.
-  async resolve() {
-    let repo = null;
-    let board = null;
-    let boardError = "";
-    try {
-      const space = focused()?.space;
-      repo = space ? await repoOfSpace(space) : null;
-      const entry = repo ? await boardEntry(repo, Object.keys(this.trackers)) : null;
-      if (entry) {
-        try {
-          board = this.trackers[entry.tracker].parse(entry.value, repo);
-        } catch (e) {
-          throw new Error(`projects.json: ${entry.key}: board.${entry.tracker}: ${e.message}`);
-        }
-      }
-    } catch (e) {
-      boardError = e.message;
-    }
-    if (board?.key !== this.board?.key) {
-      this.columns = [];
-      this.moving = null;
-      this.showAll = false;
-      this.error = "";
-      this.syncedAt = null;
-    }
-    this.repo = repo;
-    this.board = board;
-    this.tracker = board ? this.trackers[board.tracker] : null;
-    this.boardError = boardError;
-  }
-
-  // Applies what tracker says about error e: setup, read-only, pause, the message.
-  fail(tracker, e, what, write = false) {
-    const p = tracker.problem(e, what, write);
-    if (p.setup) this.setup[tracker.name] = true;
-    if (p.readOnly) this.readOnly[tracker.name] = true;
-    if (p.pause) this.pausedUntil[tracker.name] = Date.now() + PAUSE;
-    // A tracker that needs setup shows its setup screen instead of a line.
-    this.error = p.setup ? "" : p.message;
-  }
-
-  refresh(cx) {
-    if (this.loading) { this.again = true; return; }
-    this.loading = true;
-    this.again = false;
-    cx.notify();
-    cx.spawn(async (cx) => {
-      await this.resolve();
-      const { board, tracker } = this;
-      // A rate-limited tracker keeps its columns and its message until the pause is over.
-      const paused = tracker && (this.pausedUntil[tracker.name] ?? 0) > Date.now();
-      if (!paused) this.error = "";
-      if (!board) {
-        this.columns = [];
-      } else if (!paused) {
-        try {
-          this.columns = await tracker.load(board);
-          this.setup[tracker.name] = false;
-          this.syncedAt = Date.now();
-        } catch (e) {
-          this.fail(tracker, e, "load the board");
-        }
-      }
-      this.loading = false;
-      cx.notify();
-      if (this.again) this.refresh(cx);
-    });
-  }
-
-  move(item, column, cx) {
-    const { board, tracker } = this;
-    this.moving = null;
-    cx.spawn(async (cx) => {
-      try {
-        await tracker.move(board, item, column);
-      } catch (e) {
-        this.fail(tracker, e, "move it", true);
-        cx.notify();
-        return;
-      }
-      this.refresh(cx);
-    });
-  }
-
-  start(item, column, cx) {
-    const { board, tracker } = this;
-    cx.spawn(async (cx) => {
-      let p;
-      try {
-        p = await tracker.start(board, item, column);
-      } catch (e) {
-        this.fail(tracker, e, "read it");
-        cx.notify();
-        return;
-      }
-      openOverlay({ mod: "claude-new", kind: "dialog", width: 560, props: { ...p, started: STARTED } });
-    });
-  }
-
-  // A start confirmed in claude-new: its tracker moves the card, once.
-  handleStarted(cx) {
+  // A start confirmed in claude-new (tab.new already selected its tab): show it. The hub moves the card.
+  handleStarted() {
     const s = shared(STARTED);
     if (!s?.at || s.at <= this.lastStarted) return;
     this.lastStarted = s.at;
-    // The session started from the Board (tab.new already selected its tab): show it, even if the move fails.
     showTerminals();
-    const tracker = this.trackers[s.ref?.tracker];
-    if (!tracker) return;
-    // render can't notify, and a spawned body would start inside it: a timer runs it after render returns.
-    cx.timer.after(0, (cx) => cx.spawn(async (cx) => {
-      try {
-        await tracker.started(s.ref, s.plan);
-      } catch (e) {
-        this.fail(tracker, e, "move it", true);
-        cx.notify();
-        return;
-      }
-      this.refresh(cx);
-    }));
   }
 
-  // What a refresh waits for besides the timer: another space focused, a save in the edit dialog, a
-  // card's session that stopped working or ended (it may have moved its card). One refresh for any of
-  // them; a session starting work needs none.
-  watch(sessions, cx) {
-    const now = { space: focused()?.space ?? null, changed: shared(CHANGED) ?? 0,
-      working: new Set([...sessions].filter(([, s]) => s.status === "working").map(([label]) => label)) };
-    const last = this.watched;
-    this.watched = now;
-    if (!last) return;
-    const settled = [...last.working].some(label => !now.working.has(label));
-    // render can't notify, and a spawned body would start inside it: timers run these after render returns.
-    if (now.space !== last.space || now.changed !== last.changed || settled) cx.timer.after(0, (cx) => this.refresh(cx));
-    // Going to another space while the Board shows hands the keyboard to that space's terminal, hidden
-    // behind the Board, where keys reach nothing: the Board takes it. my-tabs gives it back to the pane
-    // when the terminals show again (board-toggle).
-    if (now.space !== last.space && onBoard()) cx.timer.after(0, () => this.handle.focus());
+  // Going to another space while the Board shows hands the keyboard to that space's terminal, hidden
+  // behind the Board, where keys reach nothing: the Board takes it. my-tabs gives it back to the pane
+  // when the terminals show again (board-toggle).
+  watch(cx) {
+    const space = focused()?.space ?? null;
+    const last = this.space;
+    this.space = space;
+    // render can't move focus: a timer does it after render returns.
+    if (last !== undefined && space !== last && onBoard()) cx.timer.after(0, () => this.handle.focus());
   }
 
   // Each item's live Claude session, from the label Start put on its terminal: "key=value" ->
   // { pane, status, where }. A terminal left with only its shell (Claude exited) doesn't count.
-  sessions() {
-    const keys = Object.values(this.trackers).map(t => t.labelKey);
+  sessions(b) {
+    const keys = (b.trackers ?? []).map(t => t.labelKey);
     const byAddress = new Map(agents().map(a => [a.address, a]));
     const tabs = new Map(spaces().flatMap(s => (s.tabs ?? []).map(c => [c.id, { space: s.name, tab: c.name, named: c.named }])));
     const found = new Map();
@@ -261,57 +119,47 @@ class Board {
     return found;
   }
 
-  // The tracker's browser sign-in (Linear), then a refresh.
-  signIn(cx) {
-    const tracker = this.tracker;
-    if (this.signingIn || !tracker) return;
-    this.signingIn = true;
-    this.error = "";
-    cx.notify();
-    cx.spawn(async (cx) => {
-      try {
-        await tracker.signIn();
-        this.setup[tracker.name] = false;
-      } catch (e) {
-        this.error = `Couldn't sign in to ${tracker.title}: ${e.message}`;
-      }
-      this.signingIn = false;
-      cx.notify();
-      this.refresh(cx);
-    });
-  }
-
-  writable() {
-    const t = this.tracker;
-    return Boolean(t) && !this.readOnly[t.name] && !this.setup[t.name];
+  // The tracker can take edits: known, not read-only, not waiting for setup.
+  writable(b) {
+    return Boolean(b.tracker) && !b.readOnly && !b.setup;
   }
 
   // A new item in the first column that takes one (To-Do), as its "+" does.
   newTask() {
-    if (!this.writable()) return;
-    const column = this.columns.find(c => c.todo && c.add) ?? this.columns.find(c => c.add);
-    if (column) this.editTask(column, null);
+    const b = shared("status.board") ?? {};
+    if (!this.writable(b)) return;
+    const columns = b.columns ?? [];
+    const column = columns.find(c => c.todo && c.add) ?? columns.find(c => c.add);
+    if (column) this.editTask(b, column, null);
   }
 
   // Opens this mod again as the edit dialog (./edit.js): a new item in column, or item to edit.
-  editTask(column, item) {
-    const { board, tracker } = this;
-    if (!board) return;
+  editTask(b, column, item) {
+    if (!b.key) return;
     const task = item && { id: item.id, ref: item.ref, title: item.title, description: item.description,
-      labels: item.labels.map(l => ({ id: l.id, title: l.title })) };
+      labels: item.labels.map(l => ({ id: l.id, title: l.title })), model: item.model ?? "", effort: item.effort ?? "" };
     openOverlay({ mod: "issue-board", kind: "dialog", width: 520, props: { edit: {
-      tracker: tracker.name, url: this.url, column: { id: column.id, title: column.title }, task,
-      ...tracker.editProps(board, column) } } });
+      key: b.key, tracker: b.tracker.name, noun: b.tracker.noun, column: { id: column.id, title: column.title }, task,
+      settings: b.tracker.settings } } });
   }
 
   render(cx) {
-    this.handleStarted(cx);
-    const sessions = this.sessions();
-    this.watch(sessions, cx);
+    this.handleStarted();
+    this.watch(cx);
+    const b = shared("status.board") ?? {};
+    const tracker = b.tracker;
+    const columns = b.columns ?? [];
+    // Another board: its Move row and Show all start over.
+    if (b.key !== this.key) {
+      this.key = b.key;
+      this.moving = null;
+      this.showAll = false;
+    }
+    const sessions = this.sessions(b);
     const t = theme();
     const stop = (_e, cx) => cx.stop_propagation();
-    const { board, tracker } = this;
-    const writable = this.writable();
+    const writable = this.writable(b);
+    const openTracker = () => exec("open", [b.openUrl]);
     const button = (id, label, action) => div().id(id).h(22).px(8).flex().items_center().rounded(5).text_size(11.5)
       .border_1().border_color(t.border).text_color(t.muted).hover(s => s.bg(t.hover).text_color(t.foreground))
       .on_mouse_down("left", stop).on_click((e, cx) => { cx.stop_propagation(); action(e, cx); }).child(label);
@@ -353,11 +201,15 @@ class Board {
         .child(h_flex().gap(4)
           .child(session
             ? button(`open-${item.id}`, tracker.title, () => browse())
-            : button(`start-${item.id}`, "Start", (_e, cx) => this.start(item, column, cx)))
-          .when(writable, el => el.child(button(`edit-${item.id}`, "Edit", () => this.editTask(column, item))))
-          .when(writable && this.columns.length > 1, el => el.child(button(`move-${item.id}`, moving ? "Cancel" : "Move", (_e, cx) => { this.moving = moving ? null : item.id; cx.notify(); }))))
+            : button(`start-${item.id}`, "Start", () => request("board.start", { key: b.key, item, column: bare(column) })))
+          .when(writable, el => el.child(button(`edit-${item.id}`, "Edit", () => this.editTask(b, column, item))))
+          .when(writable && columns.length > 1, el => el.child(button(`move-${item.id}`, moving ? "Cancel" : "Move", (_e, cx) => { this.moving = moving ? null : item.id; cx.notify(); }))))
         .when(moving, el => el.child(h_flex().flex_wrap().gap(4)
-          .children(this.columns.filter(c => c.id !== column.id).map(c => button(`to-${item.id}-${c.id}`, `→ ${c.title}`, (_e, cx) => this.move(item, c, cx))))));
+          .children(columns.filter(c => c.id !== column.id).map(c => button(`to-${item.id}-${c.id}`, `→ ${c.title}`, (_e, cx) => {
+            this.moving = null;
+            request("board.move", { key: b.key, item, column: bare(c) });
+            cx.notify();
+          })))));
     };
 
     const column = (col) => {
@@ -376,26 +228,26 @@ class Board {
           .child(div().font_semibold().text_size(12.5).text_color(t.foreground).child(col.title))
           .child(div().text_size(11).text_color(countColor).child(count))
           .child(div().flex_1())
-          .when(writable && col.add, el => el.child(button(`new-${col.id}`, "+", () => this.editTask(col, null)))))
+          .when(writable && col.add, el => el.child(button(`new-${col.id}`, "+", () => this.editTask(b, col, null)))))
         .child(v_flex().id(`cards-${col.id}`).flex_1().min_h(0).gap(8).overflow_y_scrollbar()
           .children(head.map(item => card(item, col)))
           .when(rest.length > 0, el => el.child(row(`more-${col.id}`, this.showAll ? "Show fewer" : `Show all (${rest.length} more)`,
             (_e, cx) => { this.showAll = !this.showAll; cx.notify(); })))
           .when(this.showAll, el => el.children(rest.map(item => card(item, col))))
           // A capped column isn't the whole list: the rest is in the tracker.
-          .when(col.capped, el => el.child(row(`capped-${col.id}`, `More in ${tracker.title}`, () => exec("open", [tracker.openUrl(board)]))))
+          .when(col.capped, el => el.child(row(`capped-${col.id}`, `More in ${tracker.title}`, openTracker)))
           .when(cards.length === 0, el => el.child(div().p(10).text_size(11.5).text_color(t.dim).child("Nothing here"))));
     };
 
     const header = h_flex().flex_none().gap(8).px(12).py(10).items_center().border_b(1).border_color(t.border)
       .child(div().h(26).flex().items_center().text_size(13).font_semibold().text_color(t.foreground)
-        .child(board ? tracker.titleOf(board) : "Issue board"))
-      .when(Boolean(board), el => el.child(div().text_size(11.5).text_color(t.dim).child(`${tracker.title} · ${tilde(board.repo)}`)))
+        .child(b.key ? b.title : "Issue board"))
+      .when(Boolean(b.key), el => el.child(div().text_size(11.5).text_color(t.dim).child(`${tracker.title} · ${tilde(b.repo)}`)))
       .child(div().flex_1())
-      .when(this.loading, el => el.child(svg("mods/workspace-chrome/spinner.svg").size(12).text_color(t.dim).spin(900)))
-      .when(Boolean(this.syncedAt), el => el.child(div().px(4).text_size(11).text_color(t.dim).child(`synced ${ago(this.syncedAt)}`)))
-      .child(button("refresh", "↻", (_e, cx) => this.refresh(cx)))
-      .when(Boolean(board), el => el.child(button("open-tracker", `Open in ${tracker.title}`, () => exec("open", [tracker.openUrl(board)]))));
+      .when(Boolean(b.loading), el => el.child(svg("mods/workspace-chrome/spinner.svg").size(12).text_color(t.dim).spin(900)))
+      .when(Boolean(b.syncedAt), el => el.child(div().px(4).text_size(11).text_color(t.dim).child(`synced ${ago(b.syncedAt)}`)))
+      .child(button("refresh", "↻", () => request("board.refresh")))
+      .when(Boolean(b.key), el => el.child(button("open-tracker", `Open in ${tracker.title}`, openTracker)));
 
     const code = (text) => div().font_family("JetBrains Mono").text_size(12).text_color(t.foreground).child(text);
 
@@ -404,34 +256,35 @@ class Board {
       .child(div().text_color(t.foreground).font_semibold().child(s.title))
       .child(div().child(s.text))
       .child(code(s.file))
-      .when(Boolean(s.signIn), el => el.child(h_flex().pt(4).child(this.signingIn
+      .when(Boolean(s.signIn), el => el.child(h_flex().pt(4).child(b.signingIn
         ? div().text_size(12).text_color(t.dim).child("Waiting for the sign-in in the browser…")
-        : button("sign-in", s.signIn, (_e, cx) => this.signIn(cx)))));
+        : button("sign-in", s.signIn, () => request("board.signIn", { key: b.key })))));
 
     // A repo without a board: how to add one, for this repo, in each tracker's terms.
     const noBoard = () => {
-      const key = this.repo ? tilde(this.repo) : null;
+      const key = b.repo ? tilde(b.repo) : null;
       return v_flex().p(20).gap(8).text_size(13).text_color(t.muted)
         .child(div().text_color(t.foreground).font_semibold().child("No issue board for this project"))
         .when(!key, el => el.child(div().child("This space isn't in a git repo on this computer, so it has no board.")))
         .when(Boolean(key), el => el
           .child(div().child(`Add one under ${key} in ${tilde(appHome())}/projects.json:`))
-          .children(Object.values(this.trackers).flatMap((tr, i) => [
+          .children((b.trackers ?? []).flatMap((tr, i) => [
             div().when(i > 0, d => d.pt(4)).child(`${i > 0 ? "or " : ""}${tr.hint}`),
             code(`"${key}": { "board": ${tr.example} }`)])));
     };
 
     let body;
-    if (this.repo === undefined || this.boardError) {
+    // repo is left out until the hub has looked at the space.
+    if (b.repo === undefined || b.boardError) {
       body = div();
-    } else if (!board) {
+    } else if (!b.key) {
       body = noBoard();
-    } else if (this.setup[tracker.name]) {
+    } else if (b.setup) {
       body = setupView(tracker.setup);
     } else {
-      body = h_flex().id("columns").flex_1().min_h(0).p(12).gap(12).items_start().overflow_x_scrollbar().children(this.columns.map(column));
+      body = h_flex().id("columns").flex_1().min_h(0).p(12).gap(12).items_start().overflow_x_scrollbar().children(columns.map(column));
     }
-    const problems = [this.boardError, this.error].filter(Boolean);
+    const problems = [b.boardError, b.error].filter(Boolean);
 
     return v_flex().id("issue-board").track_focus(this.handle).size_full().min_h(0).bg(t.canvas).text_color(t.foreground)
       .child(header)

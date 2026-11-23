@@ -1,7 +1,7 @@
 // The Board's Vikunja side: a repo's board is one Vikunja project (projects.json: "board": { "vikunja": 16 }),
-// its first kanban view's buckets as columns. Same interface as ./tracker-linear.js; main.js and ./edit.js
-// only see the board { key, tracker, repo, … } (parse), columns { id, title, limit, done, add, todo, capped,
-// cards } and cards { id, ref, title, description, done, doneAt, due, urgency, labels, who, url, label }.
+// its first kanban view's buckets as columns. Same interface as ./tracker-linear.js; ../board.js only sees
+// the board { key, tracker, repo, … } (parse), columns { id, title, limit, done, add, todo, capped, cards }
+// and cards { id, ref, title, description, done, doneAt, due, urgency, labels, who, url, label, model, effort }.
 import { appHome } from "herdr";
 import { mcp, setting, SETTING, MODELS, EFFORTS } from "./vikunja.js";
 import { targetOf, ticketMessage } from "./target.js";
@@ -43,6 +43,8 @@ export function vikunjaTracker({ url }) {
     who: null,
     url: `${url}/tasks/${task.id}`,
     label: `${TASK}=${task.id}`,
+    model: setting(task.labels, "model"),
+    effort: setting(task.labels, "effort"),
   });
 
   return {

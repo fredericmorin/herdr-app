@@ -22,8 +22,8 @@ const BASE = "https://mcp.linear.app";
 const RESOURCE = `${BASE}/mcp`;
 const PROTOCOL = "2025-06-18";
 const SCOPE = "read write";
-// This file sits in <app home>/mods/<mod>/.
-const APP_HOME = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
+// This file sits in <app home>/mods/status-hub/board/.
+const APP_HOME = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../..");
 const TOKEN = path.join(APP_HOME, ".linear-mcp.json");
 const LOCK = `${TOKEN}.lock`;
 const LOGIN_WAIT = 5 * 60_000;

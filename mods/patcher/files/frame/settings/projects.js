@@ -58,7 +58,7 @@ async function mainCheckout(folder) {
   }
 }
 
-// One Vikunja MCP tools/call, as the Board makes it (mods/issue-board/vikunja.js): curl, with the
+// One Vikunja MCP tools/call, as the Board makes it (mods/status-hub/board/vikunja.js): curl, with the
 // token from .vikunja-token on stdin, never on a command line.
 async function vikunja(tool, args) {
   const file = `${appHome()}/.vikunja-token`;
@@ -83,7 +83,7 @@ async function vikunja(tool, args) {
 
 // One Linear MCP tool call through the Board's helper (a separate Node process, signed in from the Board).
 async function linear(tool, args) {
-  const r = await exec("node", [`${appHome()}/mods/issue-board/linear-mcp.mjs`, "call", tool, JSON.stringify(args)], { timeout: 60_000 });
+  const r = await exec("node", [`${appHome()}/mods/status-hub/board/linear-mcp.mjs`, "call", tool, JSON.stringify(args)], { timeout: 60_000 });
   let out;
   try {
     out = JSON.parse((r.stdout ?? "").trim().split("\n").pop());

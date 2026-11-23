@@ -18,24 +18,18 @@ would each break the other's context.
   `feature/login  test3`. Unchanged when the branch is the space's name or detached. Only
   the drawn row changes: the PR lookup, the menu and drag still use the real space and
   branch.
-- `my-spaces`, line counts: each git read of a space's checkout also runs
-  `git --no-optional-locks -c core.fsmonitor=false diff --numstat HEAD` there (on the
-  space's machine) and sums added and removed lines, staged and unstaged. The tail shows
-  them as green `+N` and red `−N` before ahead/behind, only when not zero. Untracked files
-  aren't counted; a repo with no commit yet shows none.
-- The counts refresh with the rest of the row's git: after a command or an agent's turn
-  ends, on any change in the repo's git folder, and on the list's 60-second fallback.
-  Saving a file alone doesn't refresh them.
+- `my-spaces`, line counts: `added` / `removed` from shared `status.git` (the status
+  hub's `git diff --numstat HEAD`: uncommitted lines, staged and unstaged; untracked files
+  aren't counted, a repo with no commit yet shows none). The tail shows them as green `+N`
+  and red `−N` before ahead/behind, only when not zero. The patch computes nothing.
+- The counts refresh when the hub's do: after a command or an agent's turn ends, on any
+  change in the repo's git folder, and on its 60-second fallback. Saving a file alone
+  doesn't refresh them. `this.git` is the hub's map through `spaces-git-from-hub`.
 
 ## What it expects from Herdr's original
 
-- `mods/spaces/main.js`, `check(key, cx)`: the lines
-  `const info = { name, branch: …, ahead, behind, repo: …, linked: … };` then
-  `this.git[key] = info;` and `if (!on) this.watch(repo, cx);`. The diff read goes between
-  `info` and `this.git[key] = info;`, so `info` must be a plain object built before it's
-  stored, with `exec`, `cwd` and `on` in scope. Nothing may write the index during the
-  read: the list watches each local repo's git folder, and an index write would refresh
-  it again, in a loop.
+- `mods/spaces/main.js`: `g` (a row's `this.git[where(…)]` entry) carries `added` and
+  `removed`; they come from `status.git` (`mods/status-hub/README.md`).
 - `row({ w, i, g, tree }, t)`: destructured parameters it may reassign at its top, with
   the name drawn from `w.name` and `g` passed on to `gitTail`. The patch replaces `w` and
   `g` with copies for a worktree row (`tree` set): `w.name` becomes `g.branch`, and
@@ -54,4 +48,4 @@ would each break the other's context.
   ahead/behind are at the right edge, the PR badge (if any) last.
 - Edit a tracked file in a space's repo and run any command there: the row shows `+N −M`
   matching `git diff --numstat HEAD`. Commit or revert: the counts go away.
-- `herdr-app status` shows no errors and the list doesn't keep refreshing (no CPU spin).
+- `herdr-app status` shows no errors.

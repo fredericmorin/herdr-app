@@ -1,0 +1,22 @@
+diff -ruN a/mods/spaces/main.js b/mods/spaces/main.js
+--- a/mods/spaces/main.js	2026-11-22 21:45:32
++++ b/mods/spaces/main.js	2026-11-22 21:45:37
+@@ -64,7 +64,8 @@
+ 
+ export default class Spaces extends View {
+   init(_props, cx) {
+-    this.git = {}; // where() -> { name, branch, ahead, behind, repo, linked }, null: not a repo
++    // where() -> { name, branch, ahead, behind, repo, linked, top, added, removed }, null: not a repo; from the status hub.
++    Object.defineProperty(this, "git", { get: () => shared("status.git") ?? {} });
+     this.checked = {}; // where() -> when it was last looked at
+     this.unsure = new Set(); // where()s git couldn't answer for (a machine away)
+     this.pending = new Set(); // where()s to look at next
+@@ -97,8 +98,6 @@
+     const now = Date.now();
+     const sp = spaces();
+     for (const s of sp) if (!this.shown.has(s.id)) this.born[s.id] ??= now;
+-    const due = this.due(now, sp, panes());
+-    if (due.size) this.refreshGit(due, cx);
+     if (sp.some((s) => !this.shown.has(s.id)) || this.orderingDue(now)) cx.notify();
+   }
+ 

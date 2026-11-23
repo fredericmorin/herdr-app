@@ -1,26 +1,7 @@
 diff -ruN a/mods/spaces/main.js b/mods/spaces/main.js
---- a/mods/spaces/main.js	2026-11-19 01:59:03
-+++ b/mods/spaces/main.js	2026-11-19 02:14:20
-@@ -254,6 +254,18 @@
-       const name = repo.endsWith("/.git") ? base(repo.slice(0, -5)) : base(repo).replace(/\.git$/, "");
-       const [ahead, behind] = counts.code === 0 ? counts.stdout.trim().split(/\s+/).map(Number) : [0, 0];
-       const info = { name, branch: branch.code === 0 ? branch.stdout.trim().replace(/^refs\/heads\//, "") : "(detached)", ahead, behind, repo: JSON.stringify([on, repo]), linked: repo !== `${top}/.git` };
-+      // Uncommitted lines against HEAD, staged and unstaged (none before the first commit).
-+      // No optional locks or fsmonitor: writing the index would wake the repo watch and loop.
-+      const diff = await exec("git", ["--no-optional-locks", "-c", "core.fsmonitor=false", "diff", "--numstat", "HEAD"], { cwd, on });
-+      info.added = 0;
-+      info.removed = 0;
-+      if (diff.code === 0) {
-+        for (const line of diff.stdout.split("\n")) {
-+          const [added, removed] = line.split("\t");
-+          info.added += parseInt(added, 10) || 0;
-+          info.removed += parseInt(removed, 10) || 0;
-+        }
-+      }
-       this.git[key] = info;
-       if (!on) this.watch(repo, cx);
-     } catch {
-@@ -427,7 +439,7 @@
+--- a/mods/spaces/main.js	2026-11-22 21:45:32
++++ b/mods/spaces/main.js	2026-11-22 21:46:13
+@@ -427,7 +427,7 @@
      const same = (a) => a.toLowerCase() === name.toLowerCase();
      const branch = same(raw) || raw === "master" || raw === "main" ? "" : raw;
      const repo = tree || same(g.name) ? "" : g.name;
@@ -29,7 +10,7 @@ diff -ruN a/mods/spaces/main.js b/mods/spaces/main.js
      return h_flex()
        .flex_auto()
        .min_w(where ? SIDE_MIN : 0)
-@@ -436,12 +448,19 @@
+@@ -436,12 +436,19 @@
        .items_center()
        .text_size(11.5)
        .text_color(t.dim)

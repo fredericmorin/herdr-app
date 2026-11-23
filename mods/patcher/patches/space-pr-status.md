@@ -1,44 +1,40 @@
 # space-pr-status
 
-Shows each space's GitHub pull request at the right of its row, from the local `gh`.
-Adapted from Better Sidebar (github.com/munza/herdr-mods, Apache 2.0).
+Shows each space's pull request (GitHub) or merge request (GitLab) at the right of its row,
+from the status hub's `status.reviews`. Adapted from Better Sidebar (github.com/munza/herdr-mods,
+Apache 2.0).
 
-Made on top of: `use-patched-copies`.
+Made on top of: `use-patched-copies`. Depends on `mods/status-hub` (patch `run-status-hub`),
+which finds the PRs/MRs (gh, glab) and publishes them; the copy runs no git, gh or glab.
 
 ## What it does
 
-- `my-spaces`: new files `pr-status.js` (discovery and the badge) and `pr-icons/*.svg`
-  (pull-request, draft, merged, closed). Each row with a PR ends with its icon and
-  `#42` in the PR's state color: green Open, gray Draft, purple Merged, red Closed,
-  red Conflicts, red Checks failed, yellow Changes requested, green Ready to merge
-  (with ` ✓`). `+N` when the branch has more open PRs. The tooltip names repo, number,
-  title and state. Cmd-click (Ctrl-click off macOS) opens the PR; a plain click still
-  selects the space. When gh fails and nothing is known, a dim `PR ?` holds the error in
-  its tooltip; a known PR stays, marked stale in its tooltip, for the same branch only.
-- Discovery: git on the space's machine reads the branch, an optional
-  `branch.<b>.herdr-pr` (`owner/repo#42`) binding, and the github.com remotes; `gh pr
-  list --head <branch> --state all` runs locally per remote, keeps only heads from this
-  checkout's own remotes, prefers open PRs, else the newest. Each checkout is looked at
-  once a minute, or at once when its branch changes. Detached, non-git and non-GitHub
-  checkouts show nothing.
+- `my-spaces`: new file `pr-status.js` with the badge only, `prBadge(id, entry, t)`, drawing
+  a hub entry `{ branch, items, error? }` (shape in `mods/status-hub/README.md`). Each row
+  with an item ends with its icon (`mods/status-hub/icons/<look.icon>.svg`) and `#42`
+  (GitHub) or `!42` (GitLab) in `theme()[look.tone]`: green Open, gray Draft, purple Merged,
+  red Closed, red Conflicts, red Checks failed, yellow Changes requested, green Ready to merge
+  (with ` ✓`). `+N` when the branch has more open ones. The tooltip names repository,
+  number, `look.label` and title. Cmd-click (Ctrl-click off macOS) opens its `url`; a plain
+  click still selects the space. When the lookup failed and nothing is known, a dim `PR ?`
+  (`MR ?` when the error is glab's: the entry names no host) holds the error in its tooltip;
+  a known item stays, marked stale in its tooltip.
+- A row shows the hub's entry only while its `branch` equals the row's git branch
+  (`g?.branch`), so a branch switch hides the old badge at once, before the hub looks again.
 
 ## What it expects from Herdr's original
 
 - `mods/spaces/main.js`:
   - The `import { spaces, machines, panes, run, openOverlay, exec, hc, theme, shared,
     setShared, watchFolder, window, layout } from "herdr";` line: the patch's own import
-    goes on the line after it.
-  - `init`: the line `this.machines = [];`, after which the observer is made.
-  - `checkNew(cx)`: `const sp = spaces();` earlier in it and the line
-    `if (due.size) this.refreshGit(due, cx);`, after which it reads `panes()` and calls
-    `this.prs.refresh(...)` with each space's machine, `place(s, ps)` and
-    `this.git[where(s, ps)]?.branch`. Relies on the module-level `place` and `where`
-    helpers and `this.git` entries having `branch`.
+    goes on the line after it. Relies on `shared` and `panes` being imported there.
   - `row(...)`: the line
     `.child(g ? this.gitTail(g, tree, w.name, t) : div().flex_1()),` as the last child of
-    the row's `h_flex()`; the badge is added after it. The row's own `on_mouse_down` /
-    `on_mouse_up` drive drag and select, so the badge stops modified presses.
-- Icon paths are `mods/my-spaces/pr-icons/…`: the copy's name, not the original's.
+    the row's `h_flex()`, closing `row()`; the badge is added after it, and a `review(w, g)`
+    method right after `row()`. It reads `shared("status.reviews")?.[where(w, panes())]`
+    with the module-level `where()`. The row's own `on_mouse_down` / `on_mouse_up` drive
+    drag and select, so the badge stops modified presses.
+- Icon paths are `mods/status-hub/icons/…`, the hub's own.
 
 ## How to check it works
 
@@ -48,4 +44,4 @@ Made on top of: `use-patched-copies`.
   dragged. A plain click selects the space.
 - Switch the branch: the old PR disappears at once, the new one (if any) appears.
 - `gh auth logout` (or no network): a dim `PR ?` with the error, or the last PR marked
-  stale; the list still works.
+  stale; the list still works. A gitlab.com remote without glab: `MR ?` ("glab not installed").

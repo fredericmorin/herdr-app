@@ -88,7 +88,7 @@ Review = { host: "github" | "gitlab", repository, number, title, url,
 ```
 { key, repo, title, openUrl, tracker, trackers, columns, syncedAt, loading,
   error, boardError, setup, readOnly, signingIn }
-tracker  = { name, title, noun, labelKey, setup: { title, text, file, signIn? },
+tracker  = { name, title, noun, labelKey, setup: { title, steps: [{ text, copy? }], signIn? },
              settings: { models, efforts } | null } | null
 trackers = [{ name, title, labelKey, hint, example }]   every tracker, for "no board" hints
 column   = { id, title, limit, done, add, todo, capped, cards, type? }
@@ -103,7 +103,8 @@ card     = { id, ref, title, description, done, doneAt, due, urgency,
   or on another machine; **left out** while the hub hasn't looked at the space yet.
 - `openUrl`: the tracker page. `syncedAt`: the last good load (ms). `loading`: a load runs.
 - `error`: the last load or action error. `boardError`: why `projects.json`'s entry isn't
-  usable. `setup`: the tracker needs a token or a sign-in (show `tracker.setup`).
+  usable. `setup`: the tracker needs a token or a sign-in (show `tracker.setup`: each step's
+  `text`, then its `copy` line with a Copy button).
   `readOnly`: a write was refused. `signingIn`: a Linear browser sign-in is waiting.
 - Cards keep their tracker fields (Linear adds `team`, `teamKey`, `state`, `type`,
   `assigned`, `branch`); requests send them back as they are. `label` is the terminal label
@@ -113,7 +114,10 @@ card     = { id, ref, title, description, done, doneAt, due, urgency,
   if it grows past ~200 KB (Start and Edit read the item fresh anyway).
 - Updates every 60 s, when another space is focused or its repo is found, when a card's
   session stops working or ends, and after the hub's own writes. The Vikunja instance is
-  the layout's `board` block's `props.url` (default `https://todo.endor.one`).
+  the layout's `board` block's `props.url` (default `https://todo.endor.one`). Its token is
+  the one Claude Code has: the headers of the user-scope MCP server with URL `<url>/api/v2/mcp`
+  in `$CLAUDE_CONFIG_DIR/.claude.json` (else `~/.claude.json`), read by
+  `board/claude-mcp-headers.mjs` for each call.
 
 ### `status.focused`
 

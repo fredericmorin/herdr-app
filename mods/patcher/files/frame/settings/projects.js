@@ -59,15 +59,15 @@ async function mainCheckout(folder) {
 }
 
 // One Vikunja MCP tools/call, as the Board makes it (mods/status-hub/board/vikunja.js): curl, with the
-// token from .vikunja-token on stdin, never on a command line.
+// headers of the server added to Claude Code for that URL on stdin, never on a command line.
 async function vikunja(tool, args) {
-  const file = `${appHome()}/.vikunja-token`;
-  if (!((await readTextFile(file)) ?? "").trim()) throw new Error(`No Vikunja token in ${tilde(file)}.`);
   const body = JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name: tool, arguments: args } });
-  const script = 'printf \'header = "Authorization: Bearer %s"\\n\' "$(tr -d "[:space:]" < "$1")" | ' +
+  const script = 'cfg=$(node "$1" "$2") || exit 3; printf "%s\\n" "$cfg" | ' +
     'curl -sS -m 20 -K - -X POST -H "Content-Type: application/json" -H "Accept: application/json, text/event-stream" ' +
     '-H "MCP-Protocol-Version: 2025-06-18" --data "$3" -w "\\n%{http_code}" "$2"';
-  const r = await exec("sh", ["-c", script, "sh", file, `${VIKUNJA}/api/v2/mcp`, body]);
+  const headers = `${appHome()}/mods/status-hub/board/claude-mcp-headers.mjs`;
+  const r = await exec("sh", ["-c", script, "sh", headers, `${VIKUNJA}/api/v2/mcp`, body]);
+  if (r.code === 3) throw new Error(`${r.stderr.trim()} The Board shows how to add it.`);
   if (r.code !== 0) throw new Error((r.stderr || `curl exited ${r.code}`).trim());
   const cut = r.stdout.lastIndexOf("\n");
   const status = Number(r.stdout.slice(cut + 1));

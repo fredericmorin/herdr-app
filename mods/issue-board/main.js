@@ -65,6 +65,7 @@ class Board {
     this.moving = null;     // the card whose Move row is open
     this.showAll = false;   // a done column lists every card, not only the RECENT latest
     this.space = undefined; // the focused space at the last render
+    this.copied = "";       // the hint line last copied: its button says Copied
     // The last confirmed start handled: a new copy takes the current one as handled, so it never replays an old start.
     this.lastStarted = shared(STARTED)?.at ?? 0;
     if (checking()) return;
@@ -249,13 +250,18 @@ class Board {
       .child(button("refresh", "↻", () => request("board.refresh")))
       .when(Boolean(b.key), el => el.child(button("open-tracker", `Open in ${tracker.title}`, openTracker)));
 
-    const code = (text) => div().font_family("JetBrains Mono").text_size(12).text_color(t.foreground).child(text);
+    // A line to paste somewhere else, with its Copy button.
+    const code = (id, text) => h_flex().gap(8).items_center()
+      .child(div().flex_1().min_w(0).font_family("JetBrains Mono").text_size(12).text_color(t.foreground).child(text))
+      .child(button(`copy-${id}`, this.copied === text ? "Copied" : "Copy",
+        (_e, cx) => { cx.write_to_clipboard(text); this.copied = text; cx.notify(); }));
 
     // A tracker that needs a token or a sign-in: what to do, as the tracker says.
     const setupView = (s) => v_flex().p(20).gap(8).text_size(13).text_color(t.muted)
       .child(div().text_color(t.foreground).font_semibold().child(s.title))
-      .child(div().child(s.text))
-      .child(code(s.file))
+      .children((s.steps ?? []).flatMap((step, i) => [
+        div().when(i > 0, d => d.pt(4)).child(step.text),
+        ...(step.copy ? [code(`setup-${i}`, step.copy)] : [])]))
       .when(Boolean(s.signIn), el => el.child(h_flex().pt(4).child(b.signingIn
         ? div().text_size(12).text_color(t.dim).child("Waiting for the sign-in in the browser…")
         : button("sign-in", s.signIn, () => request("board.signIn", { key: b.key })))));
@@ -267,10 +273,11 @@ class Board {
         .child(div().text_color(t.foreground).font_semibold().child("No issue board for this project"))
         .when(!key, el => el.child(div().child("This space isn't in a git repo on this computer, so it has no board.")))
         .when(Boolean(key), el => el
-          .child(div().child(`Add one under ${key} in ${tilde(appHome())}/projects.json:`))
+          .child(div().child(`Add one under ${key} in:`))
+          .child(code("projects-json", `${tilde(appHome())}/projects.json`))
           .children((b.trackers ?? []).flatMap((tr, i) => [
-            div().when(i > 0, d => d.pt(4)).child(`${i > 0 ? "or " : ""}${tr.hint}`),
-            code(`"${key}": { "board": ${tr.example} }`)])));
+            div().pt(4).child(`${i > 0 ? "or " : ""}${tr.hint}`),
+            code(`board-${tr.name}`, `"${key}": { "board": ${tr.example} }`)])));
     };
 
     let body;

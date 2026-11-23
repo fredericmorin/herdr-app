@@ -149,8 +149,7 @@ export function linearTracker() {
     example: `{ "linear": { "team": "ENG", "mine": true } }`,
     setup: {
       title: "Not signed in to Linear",
-      text: "The Board reads Linear through Linear's MCP server. Sign in once in the browser; the token stays in:",
-      file: `${appHome()}/.linear-mcp.json`,
+      steps: [{ text: "The Board reads Linear through Linear's MCP server. Sign in once in the browser; the token stays in:", copy: `${appHome()}/.linear-mcp.json` }],
       signIn: "Sign in to Linear",
     },
     // No Model or Effort rows in the edit dialog: they're picked in claude-new.

@@ -2,8 +2,7 @@
 // its first kanban view's buckets as columns. Same interface as ./tracker-linear.js; ../board.js only sees
 // the board { key, tracker, repo, … } (parse), columns { id, title, limit, done, add, todo, capped, cards }
 // and cards { id, ref, title, description, done, doneAt, due, urgency, labels, who, url, label, model, effort }.
-import { appHome } from "herdr";
-import { mcp, setting, SETTING, MODELS, EFFORTS } from "./vikunja.js";
+import { mcp, setting, SETTING, MODELS, EFFORTS, addCommand } from "./vikunja.js";
 import { targetOf, ticketMessage } from "./target.js";
 
 // The terminal label Start puts on a card's session: the task id.
@@ -56,9 +55,11 @@ export function vikunjaTracker({ url }) {
     hint: "a Vikunja project, by its id:",
     example: `{ "vikunja": 16 }`,
     setup: {
-      title: "No Vikunja API token",
-      text: `Create one in ${url} (Settings → API Tokens, with read and write access to projects and tasks), then save it to:`,
-      file: `${appHome()}/.vikunja-token`,
+      title: "Vikunja isn't in Claude Code",
+      steps: [
+        { text: "The Board calls Vikunja's MCP server with the token Claude Code has for it. Create an API token in Vikunja (Settings → API Tokens, read and write access to projects and tasks):", copy: url },
+        { text: "then add the server to Claude Code, with the token in place of <token>:", copy: addCommand(url) },
+      ],
     },
     // The edit dialog's Model and Effort rows: the task's model/ and effort/ labels, which Start
     // hands to claude-new.
@@ -178,7 +179,7 @@ export function vikunjaTracker({ url }) {
 
     // What an error means for the Board: setup (no token), readOnly (a write the token can't do), and a message.
     problem(e, what, write = false) {
-      if (e.status === 0) return { setup: true, message: "No Vikunja API token." };
+      if (e.status === 0) return { setup: true, message: e.message };
       if (write && (e.status === 401 || e.status === 403)) {
         return { readOnly: true, message: "This token can't change tasks: give it write access to tasks in Vikunja." };
       }

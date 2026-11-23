@@ -1,0 +1,13 @@
+diff -ru a/layouts/main.json b/layouts/main.json
+--- a/layouts/main.json	2026-11-22 21:26:51
++++ b/layouts/main.json	2026-11-22 21:26:51
+@@ -92,6 +92,9 @@
+         {
+           "id": "tabs",
+           "type": "block",
++          "floating": [
++            { "id": "status-hub", "content": { "mod": "status-hub" }, "edge": "bottom", "align": "end" }
++          ],
+           "size": {
+             "px": 42
+           },

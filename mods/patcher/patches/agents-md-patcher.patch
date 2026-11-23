@@ -1,7 +1,7 @@
 diff -ru a/AGENTS.md b/AGENTS.md
---- a/AGENTS.md	2026-11-19 00:04:15
-+++ b/AGENTS.md	2026-11-19 00:04:23
-@@ -206,6 +206,13 @@
+--- a/AGENTS.md	2026-11-22 21:27:06
++++ b/AGENTS.md	2026-11-22 21:27:06
+@@ -206,6 +206,18 @@
  Mod clones rewrite their own `mods/<name>/` asset paths and self-opening
  overlay names to the new name.
  
@@ -11,6 +11,11 @@ diff -ru a/AGENTS.md b/AGENTS.md
 +originals (`mods/my-*`, `layouts/my-main.json`, and this file) so they follow
 +Herdr's updates. Never edit those copies; edit the patches. How it works and
 +how to add or fix a patch: `mods/patcher/README.md`.
++
++**Shared status (this setup):** `mods/status-hub` fetches each space's git facts,
++worktrees and PR/MR status once and publishes them as shared `status.*` keys
++(contract: `mods/status-hub/README.md`); a new mod reads those instead of running
++git or gh itself.
 +
  If you edit a shipped file anyway, the next start moves it to
  `<name>-edited` (a mod folder or layout JSON; a number is added if taken),

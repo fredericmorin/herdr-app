@@ -61,7 +61,11 @@ export class BoardHub {
     this.published = { board: "", focused: "" };
     // The last confirmed start handled: the current one counts as handled, so an old start never replays.
     this.lastStarted = shared(STARTED)?.at ?? 0;
-    cx.timer.every(REFRESH, (cx) => this.refresh(cx));
+    cx.timer.every(REFRESH, (cx) => {
+      this.refresh(cx);
+      pruneReplies();
+    });
+    pruneReplies();
     this.refresh(cx);
   }
 
@@ -352,11 +356,21 @@ export class BoardHub {
   }
 }
 
-// Answers the edit dialog's request id; replies older than KEEP_REPLY go (their dialog closed or gave up).
-function reply(id, value) {
-  const now = Date.now();
+// The replies still waiting for their dialog: younger than KEEP_REPLY.
+function fresh(now) {
   const all = {};
   for (const [k, v] of Object.entries(shared(REPLIES) ?? {})) if (now - (v.at ?? 0) < KEEP_REPLY) all[k] = v;
-  all[id] = { ...value, at: now };
-  setShared(REPLIES, all);
+  return all;
+}
+
+// Answers the edit dialog's request id.
+function reply(id, value) {
+  const now = Date.now();
+  setShared(REPLIES, { ...fresh(now), [id]: { ...value, at: now } });
+}
+
+// Drops replies nobody took (their dialog closed or gave up), so they don't stay in shared.json.
+function pruneReplies() {
+  const kept = fresh(Date.now());
+  if (Object.keys(kept).length !== Object.keys(shared(REPLIES) ?? {}).length) setShared(REPLIES, kept);
 }

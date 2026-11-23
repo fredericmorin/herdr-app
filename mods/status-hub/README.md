@@ -146,7 +146,8 @@ status.replies  = { [id]: { ok, value?, error?, id?, at } }
     the hub's tracker then moves the card (Vikunja: Plan or Doing; Linear: In Progress,
     assigned to you if nobody has it). Starts from before the hub began never replay.
   - `board.signIn {key}`: Linear's browser sign-in, then a refresh.
-- Dialog ops, answered in `status.replies[id]` (pruned after 60 s; ignore unknown ids):
+- Dialog ops, answered in `status.replies[id]` (kept 60 s, then dropped by the next reply or
+  the hub's minute timer; ignore unknown ids):
   - `task.read {key, id}` → `value: { title, description, labels, model, effort }`.
   - `task.save {key, edit: { column: {id, title} }, form: { id, labels, title,
     description, model, effort }}` → `{ ok: true }`, or `{ ok: false, error, id }`: `id`

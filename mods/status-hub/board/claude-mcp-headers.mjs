@@ -1,8 +1,9 @@
 // The headers Claude Code sends to an HTTP MCP server, as curl config lines on stdout, so the Board can
 // call Vikunja's MCP server with the token Claude already has (never on a command line).
-//   node claude-mcp-headers.mjs <server url>
+//   node claude-mcp-headers.mjs <server url> [config dir]
 // Looks in Claude Code's user-scope servers (`claude mcp add --scope user`): <config dir>/.claude.json,
-// where the config dir is $CLAUDE_CONFIG_DIR, else the home folder, as the claude the Board starts reads it.
+// where the config dir is the one given (the board's claudeConfig in projects.json), else
+// $CLAUDE_CONFIG_DIR, else the home folder. The app usually has no $CLAUDE_CONFIG_DIR of its own.
 // Exits 3 with the reason on stderr when no server there has that URL or it sends no headers.
 import fs from "node:fs";
 import os from "node:os";
@@ -12,7 +13,7 @@ const fail = (message) => { process.stderr.write(`${message}\n`); process.exit(3
 const bare = (url) => String(url ?? "").replace(/\/+$/, "");
 
 const want = bare(process.argv[2]);
-const file = path.join(process.env.CLAUDE_CONFIG_DIR || os.homedir(), ".claude.json");
+const file = path.join(process.argv[3] || process.env.CLAUDE_CONFIG_DIR || os.homedir(), ".claude.json");
 let config;
 try {
   config = JSON.parse(fs.readFileSync(file, "utf8"));

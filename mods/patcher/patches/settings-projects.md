@@ -20,7 +20,8 @@ Made on top of: nothing. It patches only `frame/settings/main.js` in place (`to`
   - Claude sessions: worktree and Plan mode for *Board Start* and for *New session*.
   - Board (per project): *None*, *Vikunja* or *Linear*.
     - Vikunja: a project list from Vikunja's MCP `projects_list` (curl with the headers of the server
-      added to Claude Code, the same call as `mods/status-hub/board/vikunja.js`), or an id field if that fails.
+      added to Claude Code, the same call as `mods/status-hub/board/vikunja.js`, from the board's
+      `claudeConfig` dir if it has one), or an id field if that fails. Picking a project keeps `claudeConfig`.
     - Linear: scope (My issues, Team cycle, Project, View), a team list (`list_teams`), and a project or
       view list (`list_projects` / `list_custom_views`, by team) plus a URL field, then an optional title.
       Calls go through `node mods/status-hub/board/linear-mcp.mjs call`, signed in from the Board.

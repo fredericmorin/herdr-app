@@ -13,14 +13,16 @@ const NO_ADD = ["plan", "doing", "done"];
 const byPosition = (a, b) => a.position - b.position;
 
 export function vikunjaTracker({ url }) {
-  const call = (tool, args) => mcp(url, tool, args);
+  // claude: the board's Claude Code config dir (projects.json's claudeConfig), null for the default.
+  const call = (claude, tool, args) => mcp(url, tool, args, claude);
   // A tool behind do_action (find_action lists them; this token sees buckets and task moves there).
-  const action = (name, args) => call("do_action", { action: name, arguments: args });
+  const action = (claude, name, args) => call(claude, "do_action", { action: name, arguments: args });
   const projects = new Map();  // project id -> { title, view }: its first kanban view
 
-  async function project(id) {
+  async function project(board) {
+    const id = board.project;
     if (!projects.has(id)) {
-      const p = await call("projects_read", { id, fields: ["id", "title", "views.id", "views.view_kind", "views.position"] });
+      const p = await call(board.claude, "projects_read", { id, fields: ["id", "title", "views.id", "views.view_kind", "views.position"] });
       const kanban = (p.views ?? []).filter(v => v.view_kind === "kanban").sort(byPosition)[0];
       if (!kanban) throw new Error(`Vikunja project ${id} (${p.title}) has no kanban view.`);
       projects.set(id, { title: p.title, view: kanban.id });
@@ -81,9 +83,9 @@ export function vikunjaTracker({ url }) {
     },
 
     async load(board) {
-      const { view } = await project(board.project);
+      const { view } = await project(board);
       // Markdown descriptions: Start hands them to Claude as they are.
-      const buckets = await action("project_view_buckets_tasks_list", { project: board.project, view, format: "markdown" });
+      const buckets = await action(board.claude, "project_view_buckets_tasks_list", { project: board.project, view, format: "markdown" });
       return (Array.isArray(buckets) ? buckets : buckets.items ?? []).sort(byPosition).map(b => ({
         id: b.id, title: b.title, limit: b.limit, capped: false,
         done: named(b.title, "done"), add: !NO_ADD.some(n => named(b.title, n)), todo: named(b.title, "to-do"),
@@ -92,8 +94,8 @@ export function vikunjaTracker({ url }) {
     },
 
     async move(board, item, column) {
-      const { view } = await project(board.project);
-      return action("task_bucket_update", { project: board.project, view, bucket: column.id, task_id: item.id });
+      const { view } = await project(board);
+      return action(board.claude, "task_bucket_update", { project: board.project, view, bucket: column.id, task_id: item.id });
     },
 
     // Reads the task again so the description is current, then gives claude-new's props. Plan mode is
@@ -101,10 +103,10 @@ export function vikunjaTracker({ url }) {
     // claude-new picks it (projects.json's board_start.plan, else ticked).
     // The session goes to the repo's main checkout and its space.
     async start(board, item, column) {
-      const { view } = await project(board.project);
+      const { view } = await project(board);
       let fresh = { ...item, identifier: item.ref };
       try {
-        fresh = await call("tasks_read", { task: item.id, format: "markdown",
+        fresh = await call(board.claude, "tasks_read", { task: item.id, format: "markdown",
           fields: ["id", "identifier", "index", "title", "description", "labels.title"] });
       } catch {}  // the card's copy is at most a minute old: good enough to start from
       // model/ and effort/ labels become claude-new's flags, not part of the message.
@@ -118,27 +120,27 @@ export function vikunjaTracker({ url }) {
       const target = await targetOf(board.repo);
       return { ...target, message, ...(named(column.title, "plan") ? { plan: false } : {}), label: item.label,
         model: setting(fresh.labels, "model"), effort: setting(fresh.labels, "effort"),
-        ref: { tracker: "vikunja", task: item.id, project: board.project, view } };
+        ref: { tracker: "vikunja", task: item.id, project: board.project, view, claude: board.claude } };
     },
 
     // A start confirmed in claude-new: the card goes to Plan or Doing.
     async started(ref, plan) {
       const title = plan ? "Plan" : "Doing";
       // The ref's own project and view: the space shown can change while the session starts.
-      const got = await action("buckets_list", { project: ref.project, view: ref.view });
+      const got = await action(ref.claude, "buckets_list", { project: ref.project, view: ref.view });
       const bucket = (Array.isArray(got) ? got : got.items ?? []).find(b => named(b.title, title.toLowerCase()));
       if (!bucket) throw new Error(`No "${title}" bucket in Vikunja project ${ref.project}'s board.`);
-      await action("task_bucket_update", { project: ref.project, view: ref.view, bucket: bucket.id, task_id: ref.task });
+      await action(ref.claude, "task_bucket_update", { project: ref.project, view: ref.view, bucket: bucket.id, task_id: ref.task });
     },
 
-    // The edit dialog's own props: where a new task goes.
+    // The edit dialog's own props: where a new task goes, and the board's Claude Code config dir.
     editProps(board) {
-      return { project: board.project };
+      return { project: board.project, claude: board.claude };
     },
 
     // The edit dialog's fresh copy of a task: { title, description, labels }.
-    read(id) {
-      return call("tasks_read", { task: id, format: "markdown", fields: ["title", "description", "labels.id", "labels.title"] });
+    read(id, board) {
+      return call(board.claude, "tasks_read", { task: id, format: "markdown", fields: ["title", "description", "labels.id", "labels.title"] });
     },
 
     // Saves the edit dialog: task id, or a new task in edit.column (created(id) right after it's made,
@@ -153,21 +155,21 @@ export function vikunjaTracker({ url }) {
       for (const [kind, value] of relabel ? wanted : []) {
         if (!value) continue;
         const name = `${kind}/${value}`;
-        const found = await call("labels_list", { q: name, fields: ["id", "title"] });
+        const found = await call(edit.claude, "labels_list", { q: name, fields: ["id", "title"] });
         const label = (found.items ?? []).find(l => l.title === name);
         if (!label) throw new Error(`No "${name}" label in Vikunja: create it there first.`);
         chosen.push(label);
       }
       if (id) {
-        await call("tasks_update", { task: id, title, description, format: "markdown" });
+        await call(edit.claude, "tasks_update", { task: id, title, description, format: "markdown" });
       } else {
-        id = (await call("tasks_create", { project: edit.project, title, description, bucket_id: edit.column.id, format: "markdown" })).id;
+        id = (await call(edit.claude, "tasks_create", { project: edit.project, title, description, bucket_id: edit.column.id, format: "markdown" })).id;
         labels = [];
         created(id);
       }
       if (relabel) {
         const kept = [...labels.filter(l => !SETTING.test(l.title ?? "")), ...chosen].map(l => ({ id: l.id, title: l.title }));
-        await action("task_labels_bulk_replace", { task: id, labels: kept });
+        await action(edit.claude, "task_labels_bulk_replace", { task: id, labels: kept });
       }
     },
 

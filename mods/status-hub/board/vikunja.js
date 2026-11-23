@@ -23,16 +23,16 @@ export class McpError extends Error {
 }
 
 // One MCP tools/call. The server is stateless (no session id): every call is a single POST,
-// answered as one server-sent event.
-export async function mcp(url, tool, args) {
+// answered as one server-sent event. claude: the Claude Code config dir holding the server, null for the default.
+export async function mcp(url, tool, args, claude = null) {
   const body = JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name: tool, arguments: args } });
   // curl, not fetch: the app's fetch fails to reach this host (private address) while curl does.
   // The headers go to curl on stdin (-K -), never on a command line; exit 3: no such server in Claude Code.
-  const script = 'cfg=$(node "$1" "$2") || exit 3; printf "%s\\n" "$cfg" | ' +
+  const script = 'cfg=$(node "$1" "$2" "$4") || exit 3; printf "%s\\n" "$cfg" | ' +
     'curl -sS -m 20 -K - -X POST -H "Content-Type: application/json" -H "Accept: application/json, text/event-stream" ' +
     '-H "MCP-Protocol-Version: 2025-06-18" --data "$3" -w "\\n%{http_code}" "$2"';
   const headers = `${appHome()}/mods/status-hub/board/claude-mcp-headers.mjs`;
-  const r = await exec("sh", ["-c", script, "sh", headers, `${url}/api/v2/mcp`, body]);
+  const r = await exec("sh", ["-c", script, "sh", headers, `${url}/api/v2/mcp`, body, claude ?? ""]);
   if (r.code === 3) throw new McpError(0, r.stderr.trim());
   if (r.code !== 0) throw new McpError(-1, (r.stderr || `curl exited ${r.code}`).trim());
   const cut = r.stdout.lastIndexOf("\n");

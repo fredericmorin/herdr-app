@@ -116,8 +116,10 @@ card     = { id, ref, title, description, done, doneAt, due, urgency,
   session stops working or ends, and after the hub's own writes. The Vikunja instance is
   the layout's `board` block's `props.url` (default `https://todo.endor.one`). Its token is
   the one Claude Code has: the headers of the user-scope MCP server with URL `<url>/api/v2/mcp`
-  in `$CLAUDE_CONFIG_DIR/.claude.json` (else `~/.claude.json`), read by
-  `board/claude-mcp-headers.mjs` for each call.
+  in `<dir>/.claude.json`, read by `board/claude-mcp-headers.mjs` for each call. `<dir>` is
+  the board's `claudeConfig` in `projects.json` (`"board": { "vikunja": 16, "claudeConfig":
+  "~/.claude-personal" }`), else `$CLAUDE_CONFIG_DIR`, else `~`: the app is usually started
+  without `$CLAUDE_CONFIG_DIR`, so a server added under another profile needs `claudeConfig`.
 
 ### `status.focused`
 

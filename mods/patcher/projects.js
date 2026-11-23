@@ -33,6 +33,9 @@ const REFERENCE = `${START}
 //                                                           //   { "project": "https://linear.app/<org>/project/<name>-<id>" }
 //                                                           //   { "view": "https://linear.app/<org>/view/<name>-<id>" }
 //                                                           // with "team", + adds issues to a project or view; "title" names it
+//                                                           // "claudeConfig": "~/.claude-personal" beside it: the Claude Code
+//                                                           // config dir whose vikunja MCP server (its token) the Board uses;
+//                                                           // default $CLAUDE_CONFIG_DIR, else ~ (the app rarely has the former)
 //     }
 //   }
 // }

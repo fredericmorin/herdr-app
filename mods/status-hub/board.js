@@ -105,7 +105,7 @@ export class BoardHub {
       const entry = repo ? await boardEntry(repo, Object.keys(this.trackers)) : null;
       if (entry) {
         try {
-          board = this.trackers[entry.tracker].parse(entry.value, repo);
+          board = { ...this.trackers[entry.tracker].parse(entry.value, repo), claude: entry.claude };
         } catch (e) {
           throw new Error(`projects.json: ${entry.key}: board.${entry.tracker}: ${e.message}`);
         }
@@ -225,7 +225,7 @@ export class BoardHub {
     if (!at) return reply(id, { ok: false, error: "That board isn't loaded." });
     cx.spawn(async () => {
       try {
-        const fresh = await at.tracker.read(task);
+        const fresh = await at.tracker.read(task, at.board);
         const labels = fresh.labels ?? [];
         reply(id, { ok: true, value: { title: fresh.title ?? "", description: fresh.description ?? "", labels,
           ...settingsOf(at.tracker, labels) } });

@@ -60,13 +60,14 @@ async function mainCheckout(folder) {
 
 // One Vikunja MCP tools/call, as the Board makes it (mods/status-hub/board/vikunja.js): curl, with the
 // headers of the server added to Claude Code for that URL on stdin, never on a command line.
-async function vikunja(tool, args) {
+// claude: the board's claudeConfig dir, null for the default.
+async function vikunja(tool, args, claude) {
   const body = JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name: tool, arguments: args } });
-  const script = 'cfg=$(node "$1" "$2") || exit 3; printf "%s\\n" "$cfg" | ' +
+  const script = 'cfg=$(node "$1" "$2" "$4") || exit 3; printf "%s\\n" "$cfg" | ' +
     'curl -sS -m 20 -K - -X POST -H "Content-Type: application/json" -H "Accept: application/json, text/event-stream" ' +
     '-H "MCP-Protocol-Version: 2025-06-18" --data "$3" -w "\\n%{http_code}" "$2"';
   const headers = `${appHome()}/mods/status-hub/board/claude-mcp-headers.mjs`;
-  const r = await exec("sh", ["-c", script, "sh", headers, `${VIKUNJA}/api/v2/mcp`, body]);
+  const r = await exec("sh", ["-c", script, "sh", headers, `${VIKUNJA}/api/v2/mcp`, body, claude ?? ""]);
   if (r.code === 3) throw new Error(`${r.stderr.trim()} The Board shows how to add it.`);
   if (r.code !== 0) throw new Error((r.stderr || `curl exited ${r.code}`).trim());
   const cut = r.stdout.lastIndexOf("\n");
@@ -94,11 +95,16 @@ async function linear(tool, args) {
   return out.value;
 }
 
+// The board's claudeConfig as a full path, null without one (the Board's own check: board/config.js).
+const claudeOf = (p) => (typeof p?.board?.claudeConfig === "string" && p.board.claudeConfig.trim() ? absolute(p.board.claudeConfig.trim()) : null);
+// The project picker's list name: one list per Claude Code config dir, as each may hold another token.
+const vikunjaList = (p) => `vikunja:${claudeOf(p) ?? ""}`;
+
 // Every Vikunja project as "Parent › Child", for the Board's project picker.
-async function vikunjaProjects() {
+async function vikunjaProjects(claude) {
   const all = [];
   for (let page = 1; page <= 20; page++) {
-    const r = await vikunja("projects_list", { fields: ["id", "title", "parent_project_id"], page });
+    const r = await vikunja("projects_list", { fields: ["id", "title", "parent_project_id"], page }, claude);
     all.push(...(r.items ?? []).filter((p) => p.id > 0));
     if (page >= (r.total_pages ?? 1)) break;
   }
@@ -256,8 +262,10 @@ export class ProjectsSection {
     this.draft = null;
     this.change((f) => {
       const s = ProjectsSection.scope(f, key);
+      // claudeConfig sits beside the tracker: picking a board keeps it.
+      const kept = isObject(s.board) ? s.board.claudeConfig : undefined;
       if (board === undefined) delete s.board;
-      else s.board = board;
+      else s.board = kept === undefined ? board : { ...board, claudeConfig: kept };
     }, cx);
   }
 
@@ -323,7 +331,7 @@ export class ProjectsSection {
     if (this.draft?.key === this.selected) return this.draft.tracker;
     const b = p?.board;
     if (b === undefined) return null;
-    const names = isObject(b) ? Object.keys(b) : [];
+    const names = isObject(b) ? Object.keys(b).filter((n) => n !== "claudeConfig") : [];
     if (names.length !== 1) return "?";
     if (names[0] === "vikunja") return Number.isInteger(b.vikunja) && b.vikunja > 0 ? "vikunja" : "?";
     if (names[0] === "linear") return isObject(b.linear) && this.linearOf(p, true).kind ? "linear" : "?";
@@ -392,7 +400,7 @@ export class ProjectsSection {
         cx.notify();
       });
     };
-    if (tracker === "vikunja") fetch("vikunja", vikunjaProjects);
+    if (tracker === "vikunja") fetch(vikunjaList(p), () => vikunjaProjects(claudeOf(p)));
     if (tracker !== "linear") return;
     fetch("teams", async () => ((await linear("list_teams", { limit: 250 })).teams ?? [])
       .map((t) => ({ value: t.key, label: t.key, detail: t.name })));
@@ -523,8 +531,8 @@ export class ProjectsSection {
     if (tracker === "vikunja") {
       const id = Number.isInteger(p?.board?.vikunja) ? p.board.vikunja : null;
       rows.push(this.block(t, "Vikunja project", "Its first kanban view's buckets are the Board's columns.",
-        this.listed(t, "vikunja", (items) => this.pickList(t, "st-pj-vk", items, id, (v, cx) => this.setBoard(this.selected, { vikunja: v }, cx)))));
-      if (this.lists.vikunja?.error) rows.push(this.host.row(t, "Project id", "Type it instead.", this.input(t, "vikunja", 120)));
+        this.listed(t, vikunjaList(p), (items) => this.pickList(t, "st-pj-vk", items, id, (v, cx) => this.setBoard(this.selected, { vikunja: v }, cx)))));
+      if (this.lists[vikunjaList(p)]?.error) rows.push(this.host.row(t, "Project id", "Type it instead.", this.input(t, "vikunja", 120)));
     }
     if (tracker === "linear") {
       const lin = this.linearOf(p);

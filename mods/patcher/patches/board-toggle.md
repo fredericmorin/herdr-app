@@ -1,6 +1,6 @@
 # board-toggle
 
-The tab bar gets a **Terminals / Board** toggle at its left, and the work area can show the
+The tab bar gets a **Board / Terminals** toggle at its left, and the work area can show the
 issue board (`mods/issue-board`: the focused space's board) in place of the shown tab's panes. Going to
 another space while the Board is up keeps it (it then shows that space's board); going to a tab, a pane or
 an agent shows the terminals again.
@@ -14,8 +14,8 @@ Made on top of: `use-patched-copies` (it touches no line of the base; it needs t
   `{ "id": "center", "type": "stack", "active": "main" }` whose second child is
   `{ "id": "board", "content": { "mod": "issue-board", "props": { "url": "https://todo.endor.one" } } }`.
   Lines are only inserted (no re-indent), so the hunks stay small.
-- `my-tabs`, `render()`: before the tab strip, a segmented toggle (Terminals
-  `mods/workspace-chrome/terminal.svg`, Board `mods/issue-board/board.svg`) runs
+- `my-tabs`, `render()`: before the tab strip, a segmented toggle (Board
+  `mods/issue-board/board.svg`, Terminals `mods/workspace-chrome/terminal.svg`) runs
   `layout.select {stack: "center", child: "main" | "board"}`. The highlight follows
   `find(root, "center").active`. Drawn only when the layout has a `center` node, followed by a
   thin divider.
@@ -56,13 +56,13 @@ Made on top of: `use-patched-copies` (it touches no line of the base; it needs t
 
 ## How to check it works
 
-1. The tab bar shows `Terminals | Board` at its left; Terminals is highlighted.
+1. The tab bar shows `Board | Terminals` at its left; Terminals is highlighted.
 2. Click Board: the work area shows the issue board; Board is highlighted.
 3. Click a tab: the terminals come back.
 4. On the Board, click another space, then press ctrl-2: the Board stays and shows each space's board.
 5. On the Board, ctrl-tab, cmd-] (next agent), click the focused agent, click an agent toast: the
    terminals come back, on that agent's tab.
-6. On the Board, click another space, then press cmd-1: the terminals come back and typing reaches
-   the terminal; cmd-2 shows the Board again.
+6. On the Board, click another space, then press cmd-2: the terminals come back and typing reaches
+   the terminal; cmd-1 shows the Board again.
 7. Show the Board, go to a tab, press ctrl--: the Board shows again and stays.
 8. `jq '..|objects|select(.id=="center")' ~/.config/herdr-app/layouts/my-main.json` shows the stack.

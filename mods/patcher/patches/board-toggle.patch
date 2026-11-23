@@ -94,7 +94,7 @@ diff -ru a/mods/tabs/main.js b/mods/tabs/main.js
            else { run("layout.select", { stack: "panel-body", child: id }); run("layout.show", { id: "panel" }); }
          }).child(svg(icon).size(14)).child(label);
      };
-+    // Terminals / Board: the layout's `center` stack shows the tab or the issue board (mods/issue-board).
++    // Board / Terminals: the layout's `center` stack shows the tab or the issue board (mods/issue-board).
 +    const center = find(root, "center");
 +    const shows = center?.active ?? "main";
 +    // While the Board stays up, going to another space keeps it (it shows that space's board); a tab or pane
@@ -115,8 +115,8 @@ diff -ru a/mods/tabs/main.js b/mods/tabs/main.js
 +      .on_click(() => run("layout.select", { stack: "center", child: id }))
 +      .child(svg(icon).size(13)).child(label);
 +    const toggle = h_flex().flex_none().p(2).gap(2).rounded(7).border_1().border_color(t.border)
-+      .child(seg("main", "Terminals", "mods/workspace-chrome/terminal.svg"))
-+      .child(seg("board", "Board", "mods/issue-board/board.svg"));
++      .child(seg("board", "Board", "mods/issue-board/board.svg"))
++      .child(seg("main", "Terminals", "mods/workspace-chrome/terminal.svg"));
      return h_flex().size_full().min_w(0).px(10).pl(lightsPadding).gap(3).items_center().bg(t.chrome).border_b(1).border_color(t.border)
        .on_mouse_up("left", () => { this.pressed = null; })
        .on_scroll_wheel(e => this.wheel(e))

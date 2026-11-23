@@ -28,5 +28,5 @@ Made on top of: `use-patched-copies` (only for consistency: it touches no line o
 
 1. `herdr-app status`: `floats` lists `keybind`.
 2. On the terminals, press `cmd-n`: a new space opens, as before.
-3. Press `cmd-2` (the Board), then `cmd-n` without clicking: the New task dialog opens for To-Do.
-4. Click a terminal pane first, then `cmd-2` and `cmd-n`: the dialog opens all the same.
+3. Press `cmd-1` (the Board), then `cmd-n` without clicking: the New task dialog opens for To-Do.
+4. Click a terminal pane first, then `cmd-1` and `cmd-n`: the dialog opens all the same.

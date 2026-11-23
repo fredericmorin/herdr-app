@@ -5,10 +5,8 @@
 // my-worktree claims are left alone: it opens their space itself. Draws nothing.
 
 import { View, div } from "gpui-kit";
-import { spaces, panes, exec, run, shared, checking, watchFolder } from "herdr";
+import { spaces, panes, run, shared, checking } from "herdr";
 
-// Remote repos can't be watched, and a watch can be reclaimed: look again this often anyway.
-const FALLBACK = 60_000;
 // How long a claim from my-worktree holds (git worktree add can take a while).
 const CLAIM = 600_000;
 
@@ -32,113 +30,56 @@ function hasSpace(c, list, on, sp, ps) {
   return false;
 }
 
-// `git worktree list --porcelain`: each checkout's path and branch, prunable ones left out.
-function parse(text) {
-  const list = [];
-  for (const block of text.split(/\n\n+/)) {
-    const lines = block.split("\n");
-    const path = lines.find((l) => l.startsWith("worktree "))?.slice(9);
-    // While git worktree add runs, the checkout is "locked initializing", at first with no branch
-    // (so no claim matches): leave it out, to be judged once git is done.
-    if (!path || lines.some((l) => l === "bare" || l.startsWith("prunable") || l === "locked initializing")) continue;
-    const branch = lines.find((l) => l.startsWith("branch "))?.slice(7).replace(/^refs\/heads\//, "") ?? null;
-    list.push({ path, branch });
-  }
-  return list;
-}
-
 export default class WorktreeSync extends View {
-  init(_props, cx) {
+  init(_props, _cx) {
     if (checking()) return;
     // repo -> the checkout paths seen last time; JSON [machine, git common dir] keys.
     try { this.seen = JSON.parse(localStorage.getItem("seen") ?? "{}"); } catch { this.seen = {}; }
-    this.repoAt = {}; // JSON [machine, folder] -> its git common dir, null outside git
-    this.watching = new Set();
-    this.places = "";
-    cx.timer.every(FALLBACK, (cx) => this.look(cx));
-    // New spaces and shells that moved change which repos are in view: cheap to notice, no git.
-    cx.timer.every(2000, (cx) => {
-      const ps = panes();
-      const now = JSON.stringify(spaces().map((s) => [s.machine ?? null, place(s, ps)]));
-      if (now === this.places) return;
-      this.places = now;
-      this.look(cx);
-    });
+    this.snapshot = "";
   }
 
-  look(cx) {
-    if (this.looking) {
-      this.again = true;
-      return;
-    }
-    this.looking = true;
-    cx.spawn(async (cx) => {
-      try { await this.sync(cx); } catch (error) { console.log(`worktree-sync: ${error}`); }
-      this.looking = false;
-      if (this.again) {
-        this.again = false;
-        this.look(cx);
-      }
-    });
-  }
-
-  async sync(cx) {
-    // The repos in view, each with one folder inside it to run git in.
-    const repos = new Map();
+  // The repos in view (status hub ids), each with the hub's checkout list; missing ones not listed yet.
+  inView() {
+    const git = shared("status.git") ?? {};
+    const worktrees = shared("status.worktrees") ?? {};
     const ps = panes();
+    const repos = new Map();
     for (const s of spaces()) {
       const at = place(s, ps);
       if (!at) continue;
-      const on = s.machine ?? null;
-      const where = JSON.stringify([on, at]);
-      if (!(where in this.repoAt)) {
-        try {
-          const r = await exec("git", ["rev-parse", "--path-format=absolute", "--git-common-dir"], { cwd: at, on });
-          this.repoAt[where] = r.code === 0 ? r.stdout.trim() : null;
-        } catch { continue; } // its machine is away: ask next time
-      }
-      const dir = this.repoAt[where];
-      if (dir) repos.set(JSON.stringify([on, dir]), { on, dir, at });
+      const repo = git[JSON.stringify([s.machine ?? null, at])]?.repo;
+      if (repo && worktrees[repo]) repos.set(repo, worktrees[repo]);
     }
-    this.inView = new Set([...repos.values()].filter((r) => r.on === null).map((r) => r.dir));
-    for (const [key, { on, dir, at }] of repos) {
-      let r;
-      try { r = await exec("git", ["worktree", "list", "--porcelain"], { cwd: at, on }); } catch { continue; }
-      if (r.code !== 0) continue;
-      const list = parse(r.stdout);
+    return repos;
+  }
+
+  sync() {
+    const now = Date.now();
+    const claims = shared("worktree-sync.claims") ?? {};
+    const sp = spaces(), ps = panes();
+    for (const [key, list] of this.inView()) {
+      const on = JSON.parse(key)[0];
       const known = this.seen[key];
       if (known) {
-        const now = Date.now();
-        const claims = shared("worktree-sync.claims") ?? {};
-        const sp = spaces(), ps2 = panes();
         for (const c of list) {
           if (known.includes(c.path)) continue;
           const claimed = c.branch !== null && now - (claims[c.branch] ?? 0) < CLAIM;
-          if (!claimed && !hasSpace(c, list, on, sp, ps2)) run("space.new", { folder: c.path, machine: on ?? "", focus: false });
+          if (!claimed && !hasSpace(c, list, on, sp, ps)) run("space.new", { folder: c.path, machine: on ?? "", focus: false });
         }
       }
       this.seen[key] = list.map((c) => c.path);
-      if (on === null) this.watch(dir, cx);
     }
     try { localStorage.setItem("seen", JSON.stringify(this.seen)); } catch {}
   }
 
-  // A local repo's git folder changes when a checkout is added there: look again then.
-  watch(dir, cx) {
-    if (this.watching.has(dir)) return;
-    this.watching.add(dir);
-    cx.spawn(async (cx) => {
-      try {
-        while (this.inView.has(dir)) {
-          await watchFolder(dir);
-          this.look(cx);
-        }
-      } catch {}
-      this.watching.delete(dir);
-    });
-  }
-
-  render() {
+  render(cx) {
+    if (this.seen) {
+      const snapshot = JSON.stringify([...this.inView()]);
+      if (snapshot !== this.snapshot) {
+        this.snapshot = snapshot;
+        cx.timer.after(0, () => this.sync());
+      }
+    }
     return div();
   }
 }

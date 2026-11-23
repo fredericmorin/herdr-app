@@ -1,0 +1,63 @@
+diff -ru a/mods/workspace-status/main.js b/mods/workspace-status/main.js
+--- a/mods/workspace-status/main.js	2026-11-22 21:58:35
++++ b/mods/workspace-status/main.js	2026-11-22 22:01:01
+@@ -1,6 +1,6 @@
+ import { View, div, svg } from "gpui-kit";
+ import { h_flex } from "gpui-base";
+-import { spaces, agents, theme, run, window, keys } from "herdr";
++import { spaces, agents, theme, run, window, keys, shared } from "herdr";
+ 
+ export default class WorkspaceStatus extends View {
+   // The palette key as actually bound, not a hardcoded one; without a
+@@ -14,15 +14,51 @@
+     return key ? `${key}  commands` : "commands";
+   }
+ 
++  // The focused space's PR/MR from the status hub, while it describes the branch checked out
++  // there; null when there is none.
++  review(t) {
++    const f = shared("status.focused");
++    const entry = shared("status.reviews")?.[f?.where];
++    if (!entry || entry.branch !== shared("status.git")?.[f?.where]?.branch) return null;
++    const r = entry.items?.[0];
++    if (!r) {
++      if (!entry.error) return null;
++      // A hub entry names no host: glab's errors say it (as the sidebar badge does).
++      const what = /glab|gitlab/i.test(entry.error) ? "MR" : "PR";
++      return div().id("status-review").flex_none().text_color(t.dim).tooltip(`${what} unavailable: ${entry.error}`).child(`${what} ?`);
++    }
++    const failed = r.failed?.length ? `\nFailed: ${r.failed.map((c) => c.name).join(", ")}` : "";
++    const text = `${r.host === "gitlab" ? "!" : "#"}${r.number} ${r.look.label}${r.ci === "pending" ? " · checks pending" : ""}`;
++    return h_flex().id("status-review").flex_none().gap(6).items_center().text_color(t[r.look.tone] ?? t.muted)
++      .tooltip(`${r.title}${failed}`).on_click((_e, cx) => cx.open_url(r.url))
++      .child(svg(`mods/status-hub/icons/${r.look.icon}.svg`).size(13)).child(text);
++  }
++
++  // The focused space's ticket from the status hub; a click shows the Board.
++  ticket(t) {
++    const k = shared("status.focused")?.ticket;
++    if (!k) return null;
++    // Shrinks first, icon included, so the palette hint stays on a narrow window.
++    return h_flex().id("status-ticket").flex_shrink(1).min_w(0).max_w(420).overflow_hidden().gap(6).items_center()
++      .tooltip(`${k.ref} ${k.title} · ${k.column}`)
++      .on_click(() => run("layout.select", { stack: "center", child: "board" }))
++      .child(svg("mods/status-hub/board.svg").size(13).flex_shrink(0))
++      .child(div().min_w(0).truncate().child(`${k.ref} ${k.title} · ${k.column}`));
++  }
++
+   render() {
+     const t = theme();
+     const space = spaces().find(s => s.active);
+     const list = agents();
+     const needs = list.filter(a => a.status === "blocked").length;
++    const review = this.review(t);
++    const ticket = this.ticket(t);
+     const label = (icon, text) => h_flex().gap(6).items_center().child(svg(`mods/workspace-chrome/${icon}.svg`).size(13)).child(text);
+     return h_flex().size_full().px(14).gap(16).items_center().bg(t.chrome).border_t(1).border_color(t.border).text_size(11.8).text_color(t.muted)
+       .child(label(space?.machine ? "server" : "monitor", space?.machine ?? "This computer"))
+       .when(Boolean(space?.branch), el => el.child(label("branch", space.branch)))
++      .when(Boolean(review), el => el.child(review))
++      .when(Boolean(ticket), el => el.child(ticket))
+       .child(h_flex().gap(6).items_center().child(div().size(6).rounded(3).bg(t.dim)).child(`${list.length} agents`)
+         .when(needs > 0, el => el.child(div().text_color(t.blocked).child(`· ${needs} needs you`))))
+       .child(div().flex_1())

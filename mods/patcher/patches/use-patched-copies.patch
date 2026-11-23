@@ -1,6 +1,6 @@
 diff -ru a/layouts/main.json b/layouts/main.json
---- a/layouts/main.json	2026-11-21 19:09:24
-+++ b/layouts/main.json	2026-11-21 19:09:24
+--- a/layouts/main.json	2026-11-22 21:58:02
++++ b/layouts/main.json	2026-11-22 21:58:02
 @@ -15,6 +15,9 @@
      "width": 1,
      "color": "border"
@@ -38,9 +38,18 @@ diff -ru a/layouts/main.json b/layouts/main.json
            }
          },
          {
+@@ -174,7 +177,7 @@
+             "px": 28
+           },
+           "content": {
+-            "mod": "workspace-status"
++            "mod": "my-workspace-status"
+           }
+         }
+       ]
 diff -ru a/mods/agents/main.js b/mods/agents/main.js
---- a/mods/agents/main.js	2026-11-21 19:09:24
-+++ b/mods/agents/main.js	2026-11-21 19:09:24
+--- a/mods/agents/main.js	2026-11-22 21:58:02
++++ b/mods/agents/main.js	2026-11-22 21:58:02
 @@ -435,7 +435,7 @@
                  .text_size(11)
                  .text_color(t.dim)
@@ -51,8 +60,8 @@ diff -ru a/mods/agents/main.js b/mods/agents/main.js
                  .child(svg(`mods/workspace-chrome/${sort.icon}.svg`).size(14)),
              ),
 diff -ru a/mods/menu/main.js b/mods/menu/main.js
---- a/mods/menu/main.js	2026-11-21 19:09:24
-+++ b/mods/menu/main.js	2026-11-21 19:09:24
+--- a/mods/menu/main.js	2026-11-22 21:58:02
++++ b/mods/menu/main.js	2026-11-22 21:58:02
 @@ -112,7 +112,7 @@
      const it = items(props(), this.git)[i];
      if (!it) return;
@@ -63,8 +72,8 @@ diff -ru a/mods/menu/main.js b/mods/menu/main.js
    }
  
 diff -ru a/mods/new-menu/main.js b/mods/new-menu/main.js
---- a/mods/new-menu/main.js	2026-11-21 19:09:24
-+++ b/mods/new-menu/main.js	2026-11-21 19:09:24
+--- a/mods/new-menu/main.js	2026-11-22 21:58:02
++++ b/mods/new-menu/main.js	2026-11-22 21:58:02
 @@ -67,7 +67,7 @@
          .when(this.failed || this.agents.length === 0, el => el.child(div().px(9).py(6).text_color(t.dim).child(this.failed ? "Could not check installed agents" : "Checking installed agents…"))))
        .child(div().h(1).mx(4).my(5).bg(t.border))
@@ -76,8 +85,8 @@ diff -ru a/mods/new-menu/main.js b/mods/new-menu/main.js
    }
  }
 diff -ru a/mods/spaces/main.js b/mods/spaces/main.js
---- a/mods/spaces/main.js	2026-11-21 19:09:24
-+++ b/mods/spaces/main.js	2026-11-21 19:09:24
+--- a/mods/spaces/main.js	2026-11-22 21:58:02
++++ b/mods/spaces/main.js	2026-11-22 21:58:02
 @@ -287,7 +287,7 @@
  
    menu(w) {
@@ -88,8 +97,8 @@ diff -ru a/mods/spaces/main.js b/mods/spaces/main.js
  
    orderingDue(now) {
 diff -ru a/mods/tabs/main.js b/mods/tabs/main.js
---- a/mods/tabs/main.js	2026-11-21 19:09:24
-+++ b/mods/tabs/main.js	2026-11-21 19:09:24
+--- a/mods/tabs/main.js	2026-11-22 21:58:02
++++ b/mods/tabs/main.js	2026-11-22 21:58:02
 @@ -147,7 +147,7 @@
        .child(h_flex().id("tab-scroll").flex_1().min_w(0).h_full().items_center().gap(3).overflow_x_scrollbar().track_scroll(this.scroll)
          .on_size_change((_size, cx) => { if (active >= 0) { this.scroll.scroll_to_item(active); cx.notify(); } })

@@ -1,6 +1,6 @@
 diff -ru a/mods/workspace-status/main.js b/mods/workspace-status/main.js
---- a/mods/workspace-status/main.js	2026-11-22 21:58:35
-+++ b/mods/workspace-status/main.js	2026-11-22 22:01:01
+--- a/mods/workspace-status/main.js	2026-11-23 08:54:10
++++ b/mods/workspace-status/main.js	2026-11-23 08:56:45
 @@ -1,6 +1,6 @@
  import { View, div, svg } from "gpui-kit";
  import { h_flex } from "gpui-base";
@@ -58,6 +58,6 @@ diff -ru a/mods/workspace-status/main.js b/mods/workspace-status/main.js
        .when(Boolean(space?.branch), el => el.child(label("branch", space.branch)))
 +      .when(Boolean(review), el => el.child(review))
 +      .when(Boolean(ticket), el => el.child(ticket))
-       .child(h_flex().gap(6).items_center().child(div().size(6).rounded(3).bg(t.dim)).child(`${list.length} agents`)
-         .when(needs > 0, el => el.child(div().text_color(t.blocked).child(`· ${needs} needs you`))))
+       .child(h_flex().gap(6).items_center().child(div().size(6).rounded(3).bg(t.dim)).child(`${list.length} ${list.length === 1 ? "agent" : "agents"}`)
+         .when(needs > 0, el => el.child(div().text_color(t.blocked).child(`· ${needs} ${needs === 1 ? "needs" : "need"} you`))))
        .child(div().flex_1())

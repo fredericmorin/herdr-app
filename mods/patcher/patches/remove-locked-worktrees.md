@@ -57,12 +57,20 @@ the equivalent code now lives.
   reads the lock as its last step.
 - `remove()`:
   - `if (changed) return "It changed since this opened. Enter again removes it anyway.";`
-    comes before the space is closed (`run("space.close", …)`); the lock re-check goes
-    right after it.
+    is the last risk check; the lock re-check goes right after it.
+  - Herdr's own lock check follows it (since 0.1.17): `git worktree list --porcelain`, then
+    `if (lock) return … "This worktree is locked." …`, which refuses a locked worktree. The
+    patch deletes that block: it would make the warning and `--force --force` unreachable.
+  - Herdr then closes the space (`closeSpace()`) before `git worktree remove` on Windows and
+    after it succeeds elsewhere (`const windows = …`, `if (windows) closeSpace();`,
+    `if (!windows) closeSpace();`). The patch deletes those lines and closes the space
+    (`run("space.close", …)` when `s?.id`) right before queueing on every platform: the
+    removal runs in the background after the dialog closes, so the space can't wait for it.
+    Herdr's `window` import is then unused; it stays, so the import line stays Herdr's.
   - `const force = this.dirty || mods.length > 0;` and then
     `git(this.repo.main, ["worktree", "remove", ...(force ? ["--force"] : []), this.repo.top], …)`;
     the patch picks `--force --force` for a locked worktree, and replaces that `git` call and
-    the `return r.ok ? "" : …` after it with the queued job and `return "";`.
+    the `if (!r.ok) return …` after it with the queued job; `return "";` stays.
   - `work()` closes the dialog when `remove()` returns `""`.
 - `lockedBy()`'s end is followed by the `queueRemoval()` helper and its own
   `import { shared as sharedValue, setShared as setSharedValue }` (aliased: `sync-new-worktrees`

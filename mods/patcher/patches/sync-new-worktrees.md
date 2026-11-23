@@ -29,9 +29,10 @@ so a space you close stays closed. Local repos are watched; every repo is looked
   - The line `export default class Worktree extends View {`, preceded by a blank line: the
     `claim()` helper and its own `import { shared, setShared } from "herdr";` go right
     before it (a separate import, so this patch doesn't share the import line with others).
-  - `work(cx)`: after `cx.notify();` comes
-    `try { this.error = props().action === "remove" ? await this.remove() : await this.create(); }`;
-    the claim runs just before that `try`, except for remove. It sits in `work()` rather
+  - `work(cx)`: it starts with `const remove = props()?.action === "remove";`, and after
+    `cx.notify();` comes
+    `try { this.error = remove ? await this.remove() : await this.create(); }`;
+    the claim runs just before that `try`, unless `remove`. It sits in `work()` rather
     than `create()` so it shares no lines with `project-worktree-settings`.
   - `create()` reads the branch from `this.text.trim()` and runs `git worktree add` with it.
 

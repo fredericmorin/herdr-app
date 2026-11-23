@@ -30,8 +30,8 @@ diff -ru a/layouts/main.json b/layouts/main.json
              "px": 69
            },
 diff -ru a/mods/worktree/main.js b/mods/worktree/main.js
---- a/mods/worktree/main.js	2026-11-19 14:49:38
-+++ b/mods/worktree/main.js	2026-11-19 14:49:38
+--- a/mods/worktree/main.js	2026-11-23 08:54:10
++++ b/mods/worktree/main.js	2026-11-23 08:56:16
 @@ -110,6 +110,28 @@
    return { mods, unpushed };
  }
@@ -61,7 +61,7 @@ diff -ru a/mods/worktree/main.js b/mods/worktree/main.js
  // The repo a folder belongs to: its main checkout and name, and whether
  // the folder is itself a linked worktree. null outside git.
  async function repoOf(folder, on) {
-@@ -142,6 +164,7 @@
+@@ -144,6 +166,7 @@
      this.repo = undefined; // undefined: looking, null: not in git
      this.dirty = false;
      this.unpushed = [];
@@ -69,7 +69,7 @@ diff -ru a/mods/worktree/main.js b/mods/worktree/main.js
      cx.spawn(async (cx) => {
        try {
          if (this.on) {
-@@ -158,6 +181,7 @@
+@@ -160,6 +183,7 @@
          if (repo && props().action === "remove") {
            this.dirty = (await git(repo.top, ["--no-optional-locks", "-c", "core.fsmonitor=false", "status", "--porcelain"], this.on)).out !== "";
            this.unpushed = (await submodules(repo.top, this.on)).unpushed;
@@ -77,30 +77,43 @@ diff -ru a/mods/worktree/main.js b/mods/worktree/main.js
          }
          if (repo && this.opening) this.list = await checkouts(repo, this.on);
          this.repo = repo;
-@@ -237,11 +261,20 @@
+@@ -240,22 +264,20 @@
      this.dirty ||= status.out !== "";
      this.unpushed = [...new Set([...this.unpushed, ...unpushed])];
      if (changed) return "It changed since this opened. Enter again removes it anyway.";
+-    const list = await git(this.repo.main, ["-c", "core.quotePath=false", "worktree", "list", "--porcelain"], this.on);
+-    if (!list.ok) return list.err || "git worktree list failed.";
+-    const checkout = list.out.split(/\n\n+/).map((record) => record.split("\n"))
+-      .find(([path]) => path === `worktree ${this.repo.top}`);
+-    const lock = checkout?.find((field) => field === "locked" || field.startsWith("locked "));
+-    if (lock) return lock === "locked" ? "This worktree is locked." : `This worktree is locked: ${lock.slice(7)}`;
+-
+-    // Git on a remote Windows machine reports a drive-letter or UNC path.
+-    const windows = this.on ? /^(?:[A-Za-z]:\/|\/\/)/.test(this.repo.top) : window().platform === "windows";
+-    const closeSpace = () => { if (s?.id) run("space.close", { id: s.id, confirmed: true }); };
+-    // A shell sitting in the folder can keep it busy on Windows.
+-    if (windows) closeSpace();
 +    // A lock that appeared since it opened gets one more warning, like other new risk.
 +    const locked = await lockOf(this.repo.top, this.on);
 +    if (locked !== null && this.locked === null) {
 +      this.locked = locked;
 +      return `It's locked now${lockedBy(locked)}. Enter again removes it anyway.`;
 +    }
-     // Terminals first: a shell sitting in the folder keeps it busy on Windows.
-     run("space.close", { id: s.id, confirmed: true });
++    // Terminals first: a shell sitting in the folder keeps it busy on Windows, and the
++    // removal runs in the background, so the space can't wait for it to succeed.
++    if (s?.id) run("space.close", { id: s.id, confirmed: true });
      const force = this.dirty || mods.length > 0;
 -    const r = await git(this.repo.main, ["worktree", "remove", ...(force ? ["--force"] : []), this.repo.top], this.on, 600_000);
--    return r.ok ? "" : r.err || "git worktree remove failed.";
+-    if (!r.ok) return r.err || "git worktree remove failed.";
+-    if (!windows) closeSpace();
 +    // git removes a locked worktree only with --force twice, which also covers changes and submodules.
 +    const forced = this.locked !== null ? ["--force", "--force"] : force ? ["--force"] : [];
 +    // In the background, then the branch when project-worktree-settings picked one (this.branch); a toast says how it went.
 +    queueRemoval({ kind: "remove", on: this.on ?? null, main: this.repo.main, top: this.repo.top, forced, branch: this.branch?.name ?? null });
-+    return "";
+     return "";
    }
  
-   key(e, cx) {
-@@ -354,6 +387,7 @@
+@@ -369,6 +391,7 @@
        .child(div().text_color(t.muted).child(detail))
        .when(remove && this.dirty, (el) => el.child(div().text_color(t.blocked).child("It has uncommitted changes: they will be lost.")))
        .when(remove && this.unpushed.length > 0, (el) => el.child(div().text_color(t.blocked).child(`Submodule ${this.unpushed.join(", ")} has commits that aren't pushed anywhere: they will be lost.`)))

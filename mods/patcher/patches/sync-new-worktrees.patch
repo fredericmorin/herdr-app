@@ -12,10 +12,10 @@ diff -ru a/layouts/main.json b/layouts/main.json
    "children": [
      {
 diff -ru a/mods/worktree/main.js b/mods/worktree/main.js
---- a/mods/worktree/main.js	2026-11-18 23:32:56
-+++ b/mods/worktree/main.js	2026-11-18 23:32:56
-@@ -120,6 +120,15 @@
-   return { top: top.out, main, name: main.split("/").pop(), linked: main !== top.out };
+--- a/mods/worktree/main.js	2026-11-23 08:54:10
++++ b/mods/worktree/main.js	2026-11-23 08:56:02
+@@ -122,6 +122,15 @@
+   return { top: top.out, main, name, linked: main !== top.out };
  }
  
 +// worktree-sync leaves a claimed branch alone: this dialog opens the new checkout's space itself.
@@ -30,11 +30,11 @@ diff -ru a/mods/worktree/main.js b/mods/worktree/main.js
  export default class Worktree extends View {
    init(_props, cx) {
      this.on = this.space()?.machine;
-@@ -191,6 +200,7 @@
+@@ -194,6 +203,7 @@
      this.busy = true;
      this.error = "";
      cx.notify();
-+    if (props().action !== "remove") claim(this.text.trim());
-     try { this.error = props().action === "remove" ? await this.remove() : await this.create(); }
++    if (!remove) claim(this.text.trim());
+     try { this.error = remove ? await this.remove() : await this.create(); }
      catch (error) { this.error = String(error); }
      this.busy = false;

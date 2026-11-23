@@ -5,10 +5,12 @@
 // above it). No `if`: always. `do`: a keys.json-style action, "name", "name:value" (the value
 // fills the command's first argument) or { "command", "args" }; "<mod>.<command>" works too; a list
 // of actions runs each in turn.
+// `keybind.pane-next` / `keybind.pane-prev` skip binds.json: they focus the next / previous pane
+// across every unsettled tab of the focused space, in tab order, wrapping.
 // Draws nothing: it floats in my-main (patcher's keybind-float) so it's always loaded.
 
 import { View, div } from "gpui-kit";
-import { layout, run, commands, focused, spaces, nextCommand, readTextFile, notify, appHome, checking } from "herdr";
+import { layout, run, commands, focused, spaces, panes, nextCommand, readTextFile, notify, appHome, checking } from "herdr";
 
 const BINDS = "mods/keybind/binds.json";
 
@@ -41,12 +43,34 @@ function parse(action) {
   return [name, first ? { [first]: action.slice(at + 1) } : {}];
 }
 
+function cyclePane(step) {
+  const here = focused();
+  const space = spaces().find((s) => s.id === here?.space);
+  if (!space) return;
+  const all = panes();
+  const list = space.tabs
+    .filter((t) => !t.settled)
+    .flatMap((t) => all.filter((p) => p.tab === t.id));
+  if (list.length === 0) return;
+  const at = list.findIndex((p) => p.tab === here.tab && p.focused);
+  // No focused pane in the list (e.g. a settled tab): start from the first or last.
+  const next = at < 0 ? (step > 0 ? 0 : list.length - 1) : (at + step + list.length) % list.length;
+  const target = list[next];
+  // Select the tab first: the docs don't say pane.focus switches tabs on its own.
+  if (target.tab !== here.tab) run("tab.select", { id: target.tab });
+  run("pane.focus", { pane: target.pane });
+}
+
 export default class Keybind extends View {
   init(_props, cx) {
     if (checking()) return;
     cx.spawn(async () => {
       for (;;) {
         const name = await nextCommand();
+        if (name === "pane-next" || name === "pane-prev") {
+          cyclePane(name === "pane-next" ? 1 : -1);
+          continue;
+        }
         // Read on every press: binds.json edits apply at once and errors show when they matter.
         let rules;
         try {

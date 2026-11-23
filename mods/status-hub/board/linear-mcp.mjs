@@ -8,6 +8,7 @@
 //   node linear-mcp.mjs tools              the server's tools/list
 //   node linear-mcp.mjs batch '<json>'     [{tool, args}] in one session, in parallel
 //   node linear-mcp.mjs call <tool> '<json>'
+// '<json>' can also be @<file>: read from that file, which is then deleted.
 // Always prints one JSON line: {ok:true, ...} or {ok:false, status, error}. status: 0 not signed in
 // (run login), 401 refused, 429 rate-limited, -1 anything else. batch gives each call its own
 // {ok, value} or {ok:false, status, error}, plus ms and calls for the whole run.
@@ -231,8 +232,19 @@ async function callAll(s, calls) {
   }));
 }
 
-function parseArg(raw, what) {
-  try { return JSON.parse(raw ?? ""); } catch { throw new Fail(-1, `${what} must be JSON`); }
+async function parseArg(raw, what) {
+  let text = raw ?? "";
+  if (text.startsWith("@")) {
+    const file = text.slice(1);
+    try {
+      text = await fs.readFile(file, "utf8");
+    } catch (e) {
+      throw new Fail(-1, `${what}: ${e.message}`);
+    } finally {
+      await fs.rm(file, { force: true });
+    }
+  }
+  try { return JSON.parse(text); } catch { throw new Fail(-1, `${what} must be JSON`); }
 }
 
 async function main() {
@@ -248,7 +260,7 @@ async function main() {
     } finally { await close(s); }
   }
   if (cmd === "batch" || cmd === "call") {
-    const calls = cmd === "batch" ? parseArg(a, "batch") : [{ tool: a, args: parseArg(b ?? "{}", "args") }];
+    const calls = cmd === "batch" ? await parseArg(a, "batch") : [{ tool: a, args: await parseArg(b ?? "{}", "args") }];
     if (!Array.isArray(calls)) throw new Fail(-1, "batch must be a JSON array of {tool, args}");
     const s = await open();
     try {

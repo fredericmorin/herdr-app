@@ -3,9 +3,11 @@
 //   { "team": "API", "mine": true }   { "team": "API", "cycle": true }   ("mine" without team: every team)
 //   { "project": "https://linear.app/acme/project/payments-1a2b3c4d5e6f" }   { "view": "<view URL>", "title": "Bugs" }
 // Built for a big workspace: a board is one server-side scope (never the workspace), only the shown one
-// loads, each open state type is one list_issues call capped at LIMIT (a full one marks its columns
+// loads, each state type is one list_issues call capped at LIMIT (a full one marks its columns
 // capped: "50+" and a "More in Linear" row), and all of a refresh's calls share one helper run.
 // Columns are the workflow states of the teams involved, merged by name, in Linear's type order.
+// Linear's MCP gives states no position, so "order": ["Open", "Watching", …] orders them inside a type.
+// "hidden": ["Triage", …] are Linear's hidden columns: listed by name, still Move targets.
 import { appHome } from "herdr";
 import { linear, linearBatch, linearLogin, LinearError } from "./linear.js";
 import { targetOf, ticketMessage } from "./target.js";
@@ -14,8 +16,9 @@ import { targetOf, ticketMessage } from "./target.js";
 const ISSUE = "linear.issue";
 const LIMIT = 50;
 const OPEN = ["triage", "backlog", "unstarted", "started"];
-// Canceled and duplicate aren't columns.
-const RANK = { triage: 0, backlog: 1, unstarted: 2, started: 3, completed: 4 };
+const RANK = { triage: 0, backlog: 1, unstarted: 2, started: 3, completed: 4, canceled: 5, duplicate: 6 };
+// Types whose columns list their most recently closed cards first.
+const CLOSED = ["completed", "canceled", "duplicate"];
 const KINDS = ["mine", "cycle", "project", "view"];
 // list_issues' fields for cards: no description (lists cut it short; Start and Edit read the issue).
 const FIELDS = ["id", "uuid", "title", "priority", "url", "gitBranchName", "updatedAt", "completedAt", "dueDate",
@@ -40,6 +43,13 @@ function parse(entry, repo) {
   if ((kind === "mine" || kind === "cycle") && entry[kind] !== true) bad(`${kind} must be true`);
   if (kind === "cycle" && !team) bad("cycle needs team");
   if (team !== null && typeof team !== "string") bad("team must be a team key or name");
+  const names = (field) => {
+    const list = entry[field] ?? [];
+    if (!Array.isArray(list) || !list.every(n => typeof n === "string")) bad(`${field} must be a list of status names`);
+    return list.map(lower);
+  };
+  const order = names("order");
+  const hidden = names("hidden");
   const slug = kind === "project" || kind === "view" ? slugOf(kind, entry[kind]) : null;
   if ((kind === "project" || kind === "view") && !slug) bad(`${kind} must be a linear.app ${kind} URL`);
   const title = typeof entry.title === "string" && entry.title.trim() ? entry.title.trim()
@@ -47,7 +57,7 @@ function parse(entry, repo) {
     : kind === "cycle" ? `${team} · cycle`
     : slug.words || `${kind} ${slug.id}`;
   return { key: `linear:${repo}:${kind}:${team ?? ""}:${slug?.id ?? ""}`, tracker: "linear", title, repo, kind, team,
-    slug: slug?.id ?? null, link: slug ? entry[kind] : null };
+    slug: slug?.id ?? null, link: slug ? entry[kind] : null, order, hidden };
 }
 
 // A list tool's items ({issues, hasNextPage, cursor}, or a plain array) and whether more are left.
@@ -56,13 +66,19 @@ function page(value) {
   return { items, more: Boolean(value?.hasNextPage) };
 }
 
-// list_issue_statuses gives no order inside a type: keep Linear's, with review states last among the
+// list_issue_statuses gives no order inside a type: keep its own, with review states last among the
 // started ones, so a team's "first started" state is In Progress, not In Review.
 const ordered = (list) => (Array.isArray(list) ? list : []).map((s, i) => ({ id: s.id, name: s.name, type: s.type,
   position: i + (s.type === "started" && /review/i.test(s.name) ? 1000 : 0) }));
 
 const lower = (s) => String(s ?? "").trim().toLowerCase();
 const nameOf = (x) => (typeof x === "string" ? x : x?.name ?? x?.displayName ?? null);
+
+// Sorts states by a board's order (lowercased names), then by position; names not in it go after.
+function byOrder(order = []) {
+  const at = (s) => { const i = order.indexOf(lower(s.name)); return i < 0 ? order.length : i; };
+  return (a, b) => at(a) - at(b) || a.position - b.position;
+}
 
 export function linearTracker() {
   const statuses = new Map();  // team (as asked: key or id) -> [{ id, name, type, position }]
@@ -133,10 +149,10 @@ export function linearTracker() {
   };
 
   // The state of item's team that column stands for: same name, else the first of the same type.
-  async function stateFor(item, column) {
+  async function stateFor(board, item, column) {
     const states = await statesOf([item.team]);
     return states.find(s => lower(s.name) === column.id)
-      ?? states.filter(s => s.type === column.type).sort((a, b) => a.position - b.position)[0] ?? null;
+      ?? states.filter(s => s.type === column.type).sort(byOrder(board.order))[0] ?? null;
   }
 
   return {
@@ -163,7 +179,7 @@ export function linearTracker() {
 
     async load(board) {
       const args = await scope(board);
-      const types = [...OPEN, "completed"];
+      const types = [...OPEN, ...CLOSED];
       const got = await linearBatch([
         ...types.map(state => ({ tool: "list_issues", args: { ...args, state, limit: LIMIT, orderBy: "updatedAt", fields: FIELDS } })),
         // The board's own team's states, even with no issues in some of them.
@@ -181,13 +197,14 @@ export function linearTracker() {
       });
       const unique = [...new Map(cards.map(c => [c.id, c])).values()];
       const states = await statesOf([board.team, ...unique.map(c => c.team)]);
-      // One column per state name, in type order, then position; issues in hidden types (canceled) drop out.
+      // One column per state name, in type order, then the board's order.
       const columns = new Map();
-      for (const s of [...states].sort((a, b) => (RANK[a.type] ?? 9) - (RANK[b.type] ?? 9) || a.position - b.position)) {
+      const inType = byOrder(board.order);
+      for (const s of [...states].sort((a, b) => (RANK[a.type] ?? 9) - (RANK[b.type] ?? 9) || inType(a, b))) {
         if (RANK[s.type] === undefined || columns.has(lower(s.name))) continue;
         columns.set(lower(s.name), { id: lower(s.name), title: s.name, type: s.type, limit: 0, capped: capped.has(s.type),
-          done: s.type === "completed", add: Boolean(board.team) && s.type !== "started" && s.type !== "completed",
-          todo: false, cards: [] });
+          done: CLOSED.includes(s.type), add: Boolean(board.team) && s.type !== "started" && !CLOSED.includes(s.type),
+          todo: false, hidden: board.hidden.includes(lower(s.name)), cards: [] });
       }
       for (const c of unique) columns.get(lower(c.state))?.cards.push(c);
       const list = [...columns.values()];
@@ -197,7 +214,7 @@ export function linearTracker() {
     },
 
     async move(board, item, column) {
-      const state = await stateFor(item, column);
+      const state = await stateFor(board, item, column);
       if (!state) throw new Error(`${item.ref}'s team has no state like ${column.title}.`);
       await linear("save_issue", { id: item.id, state: state.id });
     },
@@ -215,13 +232,13 @@ export function linearTracker() {
       });
       const target = await targetOf(board.repo);
       return { ...target, message, label: item.label, ...(fresh.branch ? { branch: fresh.branch } : {}),
-        ref: { tracker: "linear", issue: item.id, identifier: item.ref, team: item.team, assigned: fresh.assigned } };
+        ref: { tracker: "linear", issue: item.id, identifier: item.ref, team: item.team, assigned: fresh.assigned, order: board.order } };
     },
 
     // A start confirmed in claude-new, Plan mode or not: the team's first started state (In Progress),
     // and you as assignee if nobody has it.
     async started(ref) {
-      const started = (await statesOf([ref.team])).filter(s => s.type === "started").sort((a, b) => a.position - b.position)[0];
+      const started = (await statesOf([ref.team])).filter(s => s.type === "started").sort(byOrder(ref.order))[0];
       if (!started) throw new Error(`${ref.identifier}'s team has no started state.`);
       await linear("save_issue", { id: ref.issue, state: started.id, ...(ref.assigned ? {} : { assignee: "me" }) });
     },

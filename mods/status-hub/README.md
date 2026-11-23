@@ -91,7 +91,7 @@ Review = { host: "github" | "gitlab", repository, number, title, url,
 tracker  = { name, title, noun, labelKey, setup: { title, steps: [{ text, copy? }], signIn? },
              settings: { models, efforts } | null } | null
 trackers = [{ name, title, labelKey, hint, example }]   every tracker, for "no board" hints
-column   = { id, title, limit, done, add, todo, capped, cards, type? }
+column   = { id, title, limit, done, add, todo, capped, cards, type?, hidden? }  (hidden: Linear's "hidden" list)
 card     = { id, ref, title, description, done, doneAt, due, urgency,
              labels: [{ id?, title, color }], who, url, label, model?, effort?, … }
 ```

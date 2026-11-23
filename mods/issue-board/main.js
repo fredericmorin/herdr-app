@@ -13,6 +13,7 @@
 // card shows that session's space, tab and status, a click goes to it, and Start gives way to a button
 // that opens the item.
 // A done column shows its 10 most recently done cards; a Show all toggle under them lists the rest below it.
+// A hidden column (Linear's "hidden") is only a name in the Hidden columns list and a Move target.
 // Props { url }: read by the hub (the Vikunja instance). Props { edit }: the edit dialog (./edit.js).
 import { View, div, svg } from "gpui-kit";
 import { v_flex, h_flex } from "gpui-base";
@@ -240,6 +241,14 @@ class Board {
           .when(cards.length === 0, el => el.child(div().p(10).text_size(11.5).text_color(t.dim).child("Nothing here"))));
     };
 
+    // Linear's "Hidden columns": names only.
+    const hiddenList = (cols) => v_flex().id("hidden-columns").w(220).flex_none().gap(6)
+      .child(div().px(2).text_size(12).text_color(t.muted).child("Hidden columns"))
+      .children(cols.map(col => h_flex().id(`hidden-${col.id}`).h(32).px(10).gap(8).items_center().rounded(6)
+        .bg(t.background).border_1().border_color(t.border)
+        .child(div().flex_1().min_w(0).truncate().text_size(12.5).text_color(t.foreground).child(col.title))
+        .child(div().text_size(11).text_color(t.dim).child(String(col.cards.length)))));
+
     const header = h_flex().flex_none().gap(8).px(12).py(10).items_center().border_b(1).border_color(t.border)
       .child(div().h(26).flex().items_center().text_size(13).font_semibold().text_color(t.foreground)
         .child(b.key ? b.title : "Issue board"))
@@ -289,7 +298,10 @@ class Board {
     } else if (b.setup) {
       body = setupView(tracker.setup);
     } else {
-      body = h_flex().id("columns").flex_1().min_h(0).p(12).gap(12).items_start().overflow_x_scrollbar().children(columns.map(column));
+      const hidden = columns.filter(c => c.hidden);
+      body = h_flex().id("columns").flex_1().min_h(0).p(12).gap(12).items_start().overflow_x_scrollbar()
+        .children(columns.filter(c => !c.hidden).map(column))
+        .when(hidden.length > 0, el => el.child(hiddenList(hidden)));
     }
     const problems = [b.boardError, b.error].filter(Boolean);
 

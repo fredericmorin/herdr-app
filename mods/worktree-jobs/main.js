@@ -4,13 +4,14 @@
 // - { kind: "add", on, top, add, path, tab, argv } (patch project-worktree-settings): `git <add>`
 //   run in `top` on machine `on` (null: here), then a space on `path` running `argv`; a toast
 //   only when git refuses (the space opening says it worked).
-// - { kind: "remove", on, main, top, forced, branch } (patch remove-locked-worktrees):
-//   `git worktree remove <forced> <top>` run in the main checkout `main`, then
+// - { kind: "remove", on, main, top, forced, branch, space } (patch remove-locked-worktrees):
+//   `git worktree remove <forced> <top>` run in the main checkout `main`; once it succeeds, the
+//   space `space` closes (null: the dialog closed it first, on Windows), then
 //   `git branch -D <branch>` when set; a toast either way.
 // While jobs run, the block "worktree-jobs-status" (between Spaces and Agents) lists them, from
 // the shared value "worktree-jobs.running". Runs as a floating block in my-main that draws nothing.
 import { View, div } from "gpui-kit";
-import { exec, run, shared, setShared, notify, checking } from "herdr";
+import { exec, run, shared, setShared, notify, checking, spaces } from "herdr";
 
 const QUEUE = "worktree-jobs.queue";
 const RUNNING = "worktree-jobs.running";
@@ -63,6 +64,8 @@ async function remove(job) {
     notify({ title: `Couldn't remove worktree ${name}`, body: r.err || "git worktree remove failed.", level: "error" });
     return;
   }
+  // As Herdr's dialog does: the space stays open if removal fails. It may have been closed meanwhile.
+  if (job.space && spaces().some((s) => s.id === job.space)) run("space.close", { id: job.space, confirmed: true });
   if (!job.branch) {
     notify({ title: `Removed worktree ${name}`, level: "success" });
     return;

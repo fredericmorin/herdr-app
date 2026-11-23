@@ -24,11 +24,14 @@ In `mods/worktree` → `my-worktree` (the Remove worktree dialog):
   again removes it anyway." instead of removing, like Herdr's own "It changed since this
   opened" for new changes.
 - Unlocked worktrees are removed exactly as before.
-- Background removal: once the checks pass, the dialog closes the space, appends a job
-  `{ kind: "remove", on, main, top, forced, branch }` to the shared value `worktree-jobs.queue`, and closes.
+- Background removal: once the checks pass, the dialog appends a job
+  `{ kind: "remove", on, main, top, forced, branch, space }` to the shared value `worktree-jobs.queue`, and closes.
   `branch` is `this.branch?.name` (set by `project-worktree-settings` when the project has
   `deleteBranch`), else null. Closing the dialog early (Esc, a click outside) no longer stops
   anything.
+- The space closes as in Herdr's dialog: on Windows the dialog closes it before queueing (a
+  shell in the folder keeps it busy there) and `space` is null; elsewhere `space` is its id and
+  the job closes it once `git worktree remove` succeeds, so a failed removal leaves it open.
 - `my-main.json`: a floating block `worktree-jobs` on the `sidebar-footer` node (not the root,
   whose floating list `use-patched-copies` and `sync-new-worktrees` own). It draws nothing.
 - `my-main.json`: a block `worktree-jobs-status` in `sidebar-lists`, between `spaces` and
@@ -39,13 +42,16 @@ In `mods/worktree` → `my-worktree` (the Remove worktree dialog):
   hidden block's mod doesn't start until it's first shown.
 - `mods/worktree-jobs` (a personal mod, not a copy; it also runs `project-worktree-settings`'
   creations) takes the queue every 500 ms, runs
-  `git worktree remove <forced> <top>` in `main`, then `git branch -D <branch>`, and posts a
+  `git worktree remove <forced> <top>` in `main`, then closes `space` (if it's still open),
+  then `git branch -D <branch>`, and posts a
   toast: "Removed worktree <name>" (success, "Deleted branch … too."), or the git error.
 
 ## What it expects from Herdr's original
 
 `mods/worktree/main.js`. If Herdr renames or rewrites these, put the same behavior where
 the equivalent code now lives.
+
+- The new `space` field also needs `mods/worktree-jobs` (a personal mod), which closes it.
 
 - `submodules(top, on)`, ending `return { mods, unpushed };`: the helpers `lockOf` and
   `lockedBy` go right after it. `lockOf` reads `<git dir>/locked` (git's documented lock
@@ -63,10 +69,10 @@ the equivalent code now lives.
     patch deletes that block: it would make the warning and `--force --force` unreachable.
   - Herdr then closes the space (`closeSpace()`) before `git worktree remove` on Windows and
     after it succeeds elsewhere (`const windows = …`, `if (windows) closeSpace();`,
-    `if (!windows) closeSpace();`). The patch deletes those lines and closes the space
-    (`run("space.close", …)` when `s?.id`) right before queueing on every platform: the
-    removal runs in the background after the dialog closes, so the space can't wait for it.
-    Herdr's `window` import is then unused; it stays, so the import line stays Herdr's.
+    `if (!windows) closeSpace();`). The patch keeps `windows`, `closeSpace` and
+    `if (windows) closeSpace();`, and passes `space: windows ? null : s?.id ?? null` in the job
+    in place of `if (!windows) closeSpace();`: the removal runs after the dialog closes, so
+    `worktree-jobs` closes the space instead.
   - `const force = this.dirty || mods.length > 0;` and then
     `git(this.repo.main, ["worktree", "remove", ...(force ? ["--force"] : []), this.repo.top], …)`;
     the patch picks `--force --force` for a locked worktree, and replaces that `git` call and
@@ -87,12 +93,12 @@ the equivalent code now lives.
 
 - `git worktree lock --reason '{"owner":"supacode"}' <worktree>`, then Remove worktree on its
   space: the dialog says "It's locked by supacode: removing it overrides the lock."
-- Enter: the space closes, the folder is gone, `git worktree list` no longer shows it.
+- Enter: the space closes once the folder is gone, and `git worktree list` no longer shows it.
 - An unlocked worktree: no lock warning, removed as before.
 - `herdr-app status` lists a float `worktree-jobs`.
 - While a removal runs, a row "Removing <name> · Ns" shows between Spaces and Agents; it goes
   when the removal is done.
-- Remove worktree on a slow-to-delete worktree, Enter: the dialog closes at once, the space is
-  gone, and a toast "Removed worktree <name>" follows (with "Deleted branch … too." when the
+- Remove worktree on a slow-to-delete worktree, Enter: the dialog closes at once, the space
+  stays while the "Removing" row shows, then closes, and a toast "Removed worktree <name>" follows (with "Deleted branch … too." when the
   project deletes branches); `git branch --list <name>` is empty.
-- A removal git refuses: an error toast with git's message.
+- A removal git refuses: an error toast with git's message, and the space stays open.

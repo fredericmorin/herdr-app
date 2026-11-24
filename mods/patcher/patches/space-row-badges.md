@@ -77,6 +77,6 @@ break the other's context.
 - A space with two Claude Code sessions shows two Claude icons right after its name, before
   its branch and counts; a space with none shows none, its row as before.
 - A session waiting for input shows a dimmed icon; send it a message: full orange while it
-  works. One asking permission is red; one that finished in an unselected space is blue,
+  works. One asking permission is red, between two `!`; one that finished in an unselected space is blue,
   then dimmed once you look at it. Exit one (`/exit`): its icon goes.
 - Narrow the sidebar under 160px: the rail shows no icons.

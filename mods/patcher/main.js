@@ -106,9 +106,11 @@ async function apply() {
     for (const c of copies) await check(home, root, c);
     if (copies.some((c) => c.error)) return { patches, copies };
     for (const c of copies.filter((c) => c.changed)) {
+      // A mod folder is made to match the built one, files the patches no longer create included,
+      // except what Herdr writes there (the same files check() ignores). -c: same-size edits within a second.
       const copied = !isMod(c)
         ? await exec("cp", [`${root}/${c.from}`, `${home}/${c.to}`])
-        : await exec("sh", ["-c", 'mkdir -p "$2" && cp -R "$1/." "$2/"', "sh", `${root}/${c.from}`, `${home}/${c.to}`]);
+        : await exec("sh", ["-c", 'mkdir -p "$2" && rsync -a -c --delete --exclude jsconfig.json --exclude "*.d.ts" "$1/" "$2/"', "sh", `${root}/${c.from}`, `${home}/${c.to}`]);
       if (copied.code !== 0) {
         c.error = out(copied) || `Couldn't install ${c.to}.`;
         break;

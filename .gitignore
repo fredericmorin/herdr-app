@@ -1,6 +1,7 @@
 # Allowlist: only personal config and own mods; everything else is written by Herdr.
 /*
 !/.gitignore
+!/AGENTS.local.md
 !/keys.json
 !/settings.json
 !/programs.json

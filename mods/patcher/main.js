@@ -17,7 +17,6 @@ import { ensureProjects } from "./projects.js";
 // Herdr's originals that get a personal copy (a mod folder or a file), and the copy. A file
 // whose copy is itself (`to` = `from`) is patched in place: see original().
 const COPIES = [
-  { from: "AGENTS.md", to: "AGENTS.md" },
   { from: "mods/worktree", to: "mods/my-worktree" },
   { from: "mods/menu", to: "mods/my-menu" },
   { from: "mods/new-menu", to: "mods/my-new-menu" },
@@ -35,7 +34,7 @@ const FILES = ["frame/settings/projects.js", "frame/settings/folder.svg"];
 const OWN = "mods/patcher/files";
 // patches/<name>.patch, applied in this order. use-patched-copies goes first; each of the
 // others is made on top of it alone, so they apply in any order and fail or get fixed alone.
-const PATCHES = ["use-patched-copies", "project-worktree-settings", "open-all-worktrees", "sync-new-worktrees", "remove-locked-worktrees", "agents-md-patcher", "space-git-tail", "space-row-badges", "new-worktree-opens-claude-new", "vscode-button", "worktree-progress", "tab-history-float", "board-toggle", "keybind-float", "new-space-here", "settings-projects", "run-status-hub", "spaces-git-from-hub", "status-ticket-pr"];
+const PATCHES = ["use-patched-copies", "project-worktree-settings", "open-all-worktrees", "sync-new-worktrees", "remove-locked-worktrees", "space-git-tail", "space-row-badges", "new-worktree-opens-claude-new", "vscode-button", "worktree-progress", "tab-history-float", "board-toggle", "keybind-float", "new-space-here", "settings-projects", "run-status-hub", "spaces-git-from-hub", "status-ticket-pr"];
 const LAYOUT = "my-main";
 // Herdr's version (.base) and the patched one installed (.out) of each in-place file. Hidden,
 // so writing them doesn't reload the mod.

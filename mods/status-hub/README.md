@@ -72,7 +72,12 @@ Review = { host: "github" | "gitlab", repository, number, title, url,
   `auto-merge`, `draft`, `merged`, `closed`); `tone` is a theme color name (draw `theme()[look.tone]`);
   `label` says the state ("Ready to merge", "Needs approval", "Checks failed", …); `ready`:
   mergeable now. "Needs approval": GitHub's `reviewDecision` `REVIEW_REQUIRED`, GitLab's
-  `detailed_merge_status` `not_approved` (blue, `ansi4`). `look` is the review state; `ci`
+  `detailed_merge_status` `not_approved` (blue, `ansi4`). On GitLab only `mergeable` is green:
+  `unchecked` / `checking` (GitLab hasn't re-checked yet) are dim "Checking", and any other
+  blocking status is yellow (`ansi3`) with its reason ("Needs rebase", "Discussions open", …,
+  else "Blocked"). On GitHub `mergeStateStatus` `UNKNOWN` is dim "Checking", `BEHIND` yellow
+  "Branch behind", `BLOCKED` yellow "Blocked"; green "Open" is left for `UNSTABLE` and
+  `HAS_HOOKS`, which can still merge. `look` is the review state; `ci`
   is drawn beside it (my-spaces' dot).
 - `autoMerge`: an open one is set to merge by itself once it can (GitHub's `autoMergeRequest`,
   GitLab's `merge_when_pipeline_succeeds`). Its `look.icon` is then `auto-merge` (a clock)

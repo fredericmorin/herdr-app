@@ -53,6 +53,11 @@ function prAppearance(pr) {
   if (pr.mergeStateStatus === "CLEAN" && (pr.reviewDecision === "APPROVED" || !pr.reviewDecision))
     return open("ansi2", "Ready to merge", true);
   if (pr.reviewDecision === "REVIEW_REQUIRED") return open("ansi4", "Needs approval");
+  // GitHub computes this lazily: unknown until it has.
+  if (pr.mergeStateStatus === "UNKNOWN") return open("dim", "Checking");
+  if (pr.mergeStateStatus === "BEHIND") return open("ansi3", "Branch behind");
+  if (pr.mergeStateStatus === "BLOCKED") return open("ansi3", "Blocked");
+  // UNSTABLE (non-required checks failing) and HAS_HOOKS can still be merged.
   return open("ansi2", "Open");
 }
 
@@ -67,6 +72,28 @@ function githubItem(pr) {
   };
 }
 
+// Labels for GitLab's `detailed_merge_status` values that block a merge.
+const MR_BLOCKED = {
+  ci_must_pass: "Checks must pass",
+  ci_still_running: "Checks running",
+  discussions_not_resolved: "Discussions open",
+  need_rebase: "Needs rebase",
+  conflict: "Conflicts",
+  blocked_status: "Blocked by another MR",
+  merge_request_blocked: "Blocked by another MR",
+  external_status_checks: "Status checks pending",
+  jira_association_missing: "Jira issue missing",
+  security_policy_violations: "Policy violations",
+  commits_status: "Commits blocked",
+  title_regex: "Title not allowed",
+  locked_paths: "Locked paths",
+  locked_lfs_files: "Locked LFS files",
+  merge_time: "Merge window closed",
+  draft_status: "Draft",
+  not_open: "Not open",
+  broken_status: "Broken",
+};
+
 // The same looks for a merge request, from `glab mr view`.
 function mrAppearance(state, ci, mr) {
   if (state === "merged") return { icon: "merged", tone: "ansi5", label: "Merged" };
@@ -79,7 +106,11 @@ function mrAppearance(state, ci, mr) {
   if (mr.detailed_merge_status === "requested_changes") return open("ansi3", "Changes requested");
   if (mr.detailed_merge_status === "mergeable") return open("ansi2", "Ready to merge", true);
   if (mr.detailed_merge_status === "not_approved") return open("ansi4", "Needs approval");
-  return open("ansi2", "Open");
+  // GitLab re-checks lazily (e.g. after the target branch moves): unknown until it has.
+  if (["unchecked", "checking", "preparing", "approvals_syncing"].includes(mr.detailed_merge_status))
+    return open("dim", "Checking");
+  // Anything else isn't mergeable now: never green.
+  return open("ansi3", MR_BLOCKED[mr.detailed_merge_status] ?? "Blocked");
 }
 
 function gitlabItem(mr, repository) {

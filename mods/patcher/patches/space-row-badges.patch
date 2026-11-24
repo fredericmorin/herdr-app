@@ -1,19 +1,43 @@
+diff -ruN a/mods/spaces/claude-icons.js b/mods/spaces/claude-icons.js
+--- a/mods/spaces/claude-icons.js	1969-12-31 19:00:00
++++ b/mods/spaces/claude-icons.js	2026-11-23 22:09:57
+@@ -0,0 +1,18 @@
++// A space row's Claude Code sessions: one icon per agent in the space whose program is Claude,
++// dimmed while it's idle.
++import { image, svg } from "gpui-kit";
++import { h_flex } from "gpui-base";
++import { agents } from "herdr";
++
++const SIZE = 12;
++
++// An array, empty for a space without one, so such a row gets no extra gap.
++export function claudeIcons(space, t) {
++  const list = agents().filter((a) => a.space === space && a.program?.key === "claude" && a.program.icon);
++  if (!list.length) return [];
++  return [h_flex().flex_none().gap(3).items_center()
++    .children(list.map((a) => (a.program.tint
++      ? svg(a.program.icon).size(SIZE).flex_none().text_color(t.foreground)
++      : image(a.program.icon).w(SIZE).h(SIZE).flex_none())
++      .when(a.status === "idle", (el) => el.opacity(0.4))))];
++}
 diff -ruN a/mods/spaces/main.js b/mods/spaces/main.js
---- a/mods/spaces/main.js	2026-11-22 21:45:32
-+++ b/mods/spaces/main.js	2026-11-22 21:45:59
-@@ -6,6 +6,7 @@
+--- a/mods/spaces/main.js	2026-11-23 22:09:57
++++ b/mods/spaces/main.js	2026-11-23 22:09:57
+@@ -6,6 +6,8 @@
  import { View, div, svg } from "gpui-kit";
  import { v_flex, h_flex, ScrollHandle } from "gpui-base";
  import { spaces, machines, panes, run, openOverlay, exec, hc, theme, shared, setShared, watchFolder, window, layout } from "herdr";
 +import { prBadge } from "./pr-status.js";
++import { claudeIcons } from "./claude-icons.js";
  
  function find(node, id) {
    if (node?.id === id) return node;
-@@ -494,8 +495,15 @@
+@@ -501,8 +503,16 @@
            .when(Boolean(tree), el => el.pl(22).child(svg("mods/workspace-chrome/branch.svg").size(13).flex_none().text_color(t.dim)))
            .when(!tree, el => el.child(h_flex().size(18).flex_none().rounded(5).bg(fill).items_center().justify_center().text_size(10.5).font_bold().text_color("#ffffff").child([...w.name][0]?.toUpperCase() ?? "?")))
            .child(div().flex_initial().min_w(SIDE_MIN).truncate().text_color(t.foreground).child(w.name))
 -          .child(g ? this.gitTail(g, tree, w.name, t) : div().flex_1()),
++          .children(claudeIcons(w.id, t))
 +          .child(g ? this.gitTail(g, tree, w.name, t) : div().flex_1())
 +          .child(prBadge(`space-${w.id}`, this.review(w, g), t)),
        );
@@ -28,7 +52,7 @@ diff -ruN a/mods/spaces/main.js b/mods/spaces/main.js
    compact({ w, i }, t) {
 diff -ruN a/mods/spaces/pr-status.js b/mods/spaces/pr-status.js
 --- a/mods/spaces/pr-status.js	1969-12-31 19:00:00
-+++ b/mods/spaces/pr-status.js	2026-11-22 21:46:13
++++ b/mods/spaces/pr-status.js	2026-11-23 22:09:57
 @@ -0,0 +1,58 @@
 +// The badge a space row shows for its branch's pull request (GitHub) or merge request
 +// (GitLab). The status hub (mods/status-hub) finds them and publishes `status.reviews`;

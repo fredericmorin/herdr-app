@@ -12,7 +12,7 @@ would each break the other's context.
 - `my-spaces`, branch beside the name: the tail's repo · branch text grows to fill the
   row (`flex_1`), so it sits right after the name and everything after it is pushed to
   the right edge. What it shows is unchanged: master, main and a branch repeating the
-  name still go unsaid. A PR badge after the tail (`space-pr-status`) stays at the right.
+  name still go unsaid. A PR badge after the tail (`space-row-badges`) stays at the right.
 - `my-spaces`, worktrees: a worktree row (nested under its repo's space) reads as its
   branch in the name's place, with the space's own name in the tail's dim branch spot:
   `feature/login  test3`. Unchanged when the branch is the space's name or detached. Only
@@ -34,7 +34,7 @@ would each break the other's context.
   the name drawn from `w.name` and `g` passed on to `gitTail`. The patch replaces `w` and
   `g` with copies for a worktree row (`tree` set): `w.name` becomes `g.branch`, and
   `g.worktree` carries the space's name. The copies keep every other field, so
-  `space-pr-status`'s badge (which reads `g?.branch` and `place(w, …)`) still matches.
+  `space-row-badges`'s badge (which reads `g?.branch` and `place(w, …)`) still matches.
 - `gitTail(g, tree, name, t)`: the line
   `const where = [repo, branch].filter(Boolean).join(" · ");`, which becomes
   `g.worktree ?? …`. Also a `flex_auto()` `h_flex()` chain containing

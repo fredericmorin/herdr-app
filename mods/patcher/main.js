@@ -35,7 +35,7 @@ const FILES = ["frame/settings/projects.js", "frame/settings/folder.svg"];
 const OWN = "mods/patcher/files";
 // patches/<name>.patch, applied in this order. use-patched-copies goes first; each of the
 // others is made on top of it alone, so they apply in any order and fail or get fixed alone.
-const PATCHES = ["use-patched-copies", "project-worktree-settings", "open-all-worktrees", "sync-new-worktrees", "remove-locked-worktrees", "agents-md-patcher", "space-git-tail", "space-pr-status", "new-worktree-opens-claude-new", "vscode-button", "worktree-progress", "tab-history-float", "board-toggle", "keybind-float", "new-space-here", "settings-projects", "run-status-hub", "spaces-git-from-hub", "status-ticket-pr"];
+const PATCHES = ["use-patched-copies", "project-worktree-settings", "open-all-worktrees", "sync-new-worktrees", "remove-locked-worktrees", "agents-md-patcher", "space-git-tail", "space-row-badges", "new-worktree-opens-claude-new", "vscode-button", "worktree-progress", "tab-history-float", "board-toggle", "keybind-float", "new-space-here", "settings-projects", "run-status-hub", "spaces-git-from-hub", "status-ticket-pr"];
 const LAYOUT = "my-main";
 // Herdr's version (.base) and the patched one installed (.out) of each in-place file. Hidden,
 // so writing them doesn't reload the mod.

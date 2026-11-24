@@ -1,11 +1,14 @@
-# space-pr-status
+# space-row-badges
 
 Shows each space's pull request (GitHub) or merge request (GitLab) at the right of its row,
-from the status hub's `status.reviews`. Adapted from Better Sidebar (github.com/munza/herdr-mods,
-Apache 2.0).
+from the status hub's `status.reviews`, and a Claude icon per Claude Code session in the
+space right after its name. Adapted from Better Sidebar (github.com/munza/herdr-mods, Apache 2.0).
 
 Made on top of: `use-patched-copies`. Depends on `mods/status-hub` (patch `run-status-hub`),
 which finds the PRs/MRs (gh, glab) and publishes them; the copy runs no git, gh or glab.
+The Claude icons are in this patch, not one of their own: they go between the name and the
+tail, next to the tail line this patch changes for the badge, so separate patches would each
+break the other's context.
 
 ## What it does
 
@@ -21,20 +24,35 @@ which finds the PRs/MRs (gh, glab) and publishes them; the copy runs no git, gh 
   a known item stays, marked stale in its tooltip.
 - A row shows the hub's entry only while its `branch` equals the row's git branch
   (`g?.branch`), so a branch switch hides the old badge at once, before the hub looks again.
+- `my-spaces`, Claude icons: new file `claude-icons.js`, `claudeIcons(space, t)`. For every
+  agent in `agents()` whose `space` is the row's and whose `program.key` is `claude`, one
+  12px icon (the program table's `program.icon`: `icons/claude.svg` unless `programs.json`
+  changes it), 3px apart, in the agents list's order, right after the space's name and
+  before its git tail (branch text, counts, ahead/behind), so before the badge too. An `idle`
+  agent's icon is dimmed (opacity 0.4); `working`, `blocked` and `done` show full. Only
+  agents count: a terminal where Claude has exited (a shell again) has none, and sub-agents
+  without a pane aren't in `agents()`. A space with none adds nothing to its row (an empty
+  array, so no extra gap). The collapsed rail draws no icons. Clicks on them are the row's.
 
 ## What it expects from Herdr's original
 
 - `mods/spaces/main.js`:
   - The `import { spaces, machines, panes, run, openOverlay, exec, hc, theme, shared,
     setShared, watchFolder, window, layout } from "herdr";` line: the patch's own import
-    goes on the line after it. Relies on `shared` and `panes` being imported there.
+    goes on the line after it (both imports: `prBadge`, `claudeIcons`). Relies on `shared`
+    and `panes` being imported there.
   - `row(...)`: the line
     `.child(g ? this.gitTail(g, tree, w.name, t) : div().flex_1()),` as the last child of
-    the row's `h_flex()`, closing `row()`; the badge is added after it, and a `review(w, g)`
-    method right after `row()`. It reads `shared("status.reviews")?.[where(w, panes())]`
+    the row's `h_flex()`, closing `row()`, right after the name's
+    `.child(div().flex_initial()….child(w.name))`. The Claude icons (`claudeIcons(w.id, t)`;
+    `w.id` is the real space's id even on a worktree row, where `space-git-tail` copies `w`
+    but keeps `id`) go between the two, the badge after the tail, and a `review(w, g)` method
+    right after `row()`. It reads `shared("status.reviews")?.[where(w, panes())]`
     with the module-level `where()`. The row's own `on_mouse_down` / `on_mouse_up` drive
     drag and select, so the badge stops modified presses.
 - Icon paths are `mods/status-hub/icons/…`, the hub's own.
+- `herdr`'s `agents()` with `space` (the same ids as `spaces()`), `status` and `program.key`,
+  `program.icon`, `program.tint`.
 
 ## How to check it works
 
@@ -45,3 +63,8 @@ which finds the PRs/MRs (gh, glab) and publishes them; the copy runs no git, gh 
 - Switch the branch: the old PR disappears at once, the new one (if any) appears.
 - `gh auth logout` (or no network): a dim `PR ?` with the error, or the last PR marked
   stale; the list still works. A gitlab.com remote without glab: `MR ?` ("glab not installed").
+- A space with two Claude Code sessions shows two Claude icons right after its name, before
+  its branch and counts; a space with none shows none, its row as before.
+- A session waiting for input shows a dimmed icon; send it a message: full while it works.
+  Exit one (`/exit`): its icon goes.
+- Narrow the sidebar under 160px: the rail shows no icons.

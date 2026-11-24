@@ -16,7 +16,7 @@ Made on top of: `use-patched-copies`.
   their repo's space, and new spaces still wait (at most 1.5 s, the `born` wait in
   `ordered()`) until the hub has looked at their place, so a worktree lands under its repo
   without jumping.
-- The `+N −M` counts (`space-git-tail`) and the PR/MR badge (`space-pr-status`) read
+- The `+N −M` counts (`space-git-tail`) and the PR/MR badge (`space-row-badges`) read
   the same hub data. `mods/status-hub` must be running (patch `run-status-hub`), or every
   row shows no git.
 - `due`, `refreshGit`, `check` and `watch` stay in the copy, unused: deleting them would

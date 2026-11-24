@@ -16,9 +16,14 @@ break the other's context.
   a hub entry `{ branch, items, error? }` (shape in `mods/status-hub/README.md`). Each row
   with an item ends with its icon (`mods/status-hub/icons/<look.icon>.svg`) and `#42`
   (GitHub) or `!42` (GitLab) in `theme()[look.tone]`: green Open, gray Draft, purple Merged,
-  red Closed, red Conflicts, red Checks failed, yellow Changes requested, green Ready to merge
-  (with ` ✓`). `+N` when the branch has more open ones. The tooltip names repository,
-  number, `look.label` and title. Cmd-click (Ctrl-click off macOS) opens its `url`; a plain
+  red Closed, red Conflicts, red Checks failed, yellow Changes requested, blue Needs approval,
+  green Ready to merge (with `✓`). `+N` when the branch has more open ones.
+  Right after the number, an open or draft one's CI (`item.ci`): a ring in `theme().working`
+  while checks run, a green (`ansi2`) dot once they passed, a red (`ansi1`) one when they failed;
+  nothing without CI, and none beside `✓` (ready to merge implies passed). The icon's color
+  stays the review state, so a conflicted PR with passing checks is a red icon with a green dot.
+  The tooltip names repository, number, `look.label`, the CI line ("Checks running",
+  "Checks passed", "Checks failed: <names>") and title. Cmd-click (Ctrl-click off macOS) opens its `url`; a plain
   click still selects the space. When the lookup failed and nothing is known, a dim `PR ?`
   (`MR ?` when the error is glab's: the entry names no host) holds the error in its tooltip;
   a known item stays, marked stale in its tooltip.
@@ -57,7 +62,9 @@ break the other's context.
 ## How to check it works
 
 - A space on a branch with an open PR shows its icon and number at the right; hovering
-  shows the title and state.
+  shows the title, state and checks.
+- Push to it: a ring follows the number while CI runs, then a green or red dot. A draft with
+  CI shows the same dots.
 - Cmd-click the number: the PR opens in the browser and the space isn't selected or
   dragged. A plain click selects the space.
 - Switch the branch: the old PR disappears at once, the new one (if any) appears.

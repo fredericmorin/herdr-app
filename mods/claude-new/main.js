@@ -6,8 +6,9 @@
 // { folder } alone (the Board, when the repo's main checkout has no space) targets that folder: a worktree of it,
 // or without one a new space there.
 // Props { message } fill in the first message (the issue board's Start).
-// The Plan mode checkbox starts Claude with `--permission-mode plan`; props { plan } tick or untick it.
-// Without props { plan }, New worktree and Plan mode start from projects.json's defaults for the
+// The Plan mode checkbox starts Claude with `--permission-mode plan`; props { plan } tick or untick it,
+// and props { worktree } the New worktree box (the Board's Fix CI: false, the session's own checkout).
+// Without those props, New worktree and Plan mode start from projects.json's defaults for the
 // target's repo (`board_start` for a Board start, i.e. props { ref }; `new_session` otherwise), else worktree on and
 // plan on for the Board, off otherwise. A box clicked before projects.json is read keeps the click.
 // The Model and Effort rows add `--model` / `--effort`; Default adds neither. Props { model, effort } pick them
@@ -104,7 +105,7 @@ export default class ClaudeNew extends View {
     const p = props();
     this.target = p?.space || p?.folder ? { space: p.space, cwd: p.folder } : focused();
     this.board = Boolean(p?.ref);
-    this.worktree = true;
+    this.worktree = typeof p?.worktree === "boolean" ? p.worktree : true;
     this.plan = typeof p?.plan === "boolean" ? p.plan : this.board;
     this.clicked = { worktree: false, plan: false }; // a box clicked by hand: projects.json no longer moves it
     this.settingsError = "";
@@ -115,7 +116,7 @@ export default class ClaudeNew extends View {
       try {
         // An invalid claudeConfig shows here too, before claude.sh refuses it on Start.
         const [d] = await Promise.all([claudeDefaults(this.board ? "board_start" : "new_session", this.target?.cwd, this.on), this.claudeDir]);
-        if (d.worktree !== undefined && !this.clicked.worktree) this.worktree = d.worktree;
+        if (d.worktree !== undefined && !this.clicked.worktree && typeof p?.worktree !== "boolean") this.worktree = d.worktree;
         if (d.plan !== undefined && !this.clicked.plan && typeof p?.plan !== "boolean") this.plan = d.plan;
       } catch (error) { this.settingsError = error.message; }
       cx.notify();

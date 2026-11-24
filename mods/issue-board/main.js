@@ -11,13 +11,15 @@
 // `issue-board.new` (cmd-n through the keybind mod, while the board shows) is the To-Do column's "+".
 // Start labels the session's terminal (vikunja.task=<id>, linear.issue=<ID>): while Claude runs there, the
 // card shows that session's space, tab and status, a click goes to it, and Start gives way to a button
-// that opens the item.
+// that opens the item. Its space's pull/merge request (the status hub's `status.reviews`) shows under it
+// (click opens it), and a Fix CI button when its checks failed: claude-new in that space and checkout
+// (no worktree), with the failed checks as the first message.
 // A done column shows its 10 most recently done cards; a Show all toggle under them lists the rest below it.
 // A hidden column (Linear's "hidden") is only a name in the Hidden columns list and a Move target.
 // Props { url }: read by the hub (the Vikunja instance). Props { edit }: the edit dialog (./edit.js).
 import { View, div, svg } from "gpui-kit";
 import { v_flex, h_flex } from "gpui-base";
-import { props, theme, nextCommand, exec, openOverlay, appHome, home, checking, shared, layout, run, spaces, agents, terminals, focused } from "herdr";
+import { props, theme, nextCommand, exec, openOverlay, appHome, home, checking, shared, layout, run, spaces, agents, terminals, focused, panes } from "herdr";
 import { EditDialog } from "./edit.js";
 import { request } from "./requests.js";
 
@@ -59,6 +61,49 @@ const tilde = (path) => (path.startsWith(`${home()}/`) ? `~${path.slice(home().l
 // A column as a request sends it: without its cards.
 const bare = ({ cards, ...column }) => column;
 
+// Where a space is now: its first terminal's live folder, else where it was made. Its key in the status
+// hub's status.git and status.reviews. Same as the hub's place() (a mod can't import another's files).
+function placeOf(space, ps) {
+  const tabs = new Set((space.tabs ?? []).map((c) => c.id));
+  return ps.find((p) => tabs.has(p.tab) && p.cwd)?.cwd || space.folder;
+}
+
+// The space's PR/MR from the hub, only while it describes the branch the space is on:
+// { item, space, folder } or null.
+function reviewOf(space, ps) {
+  if (!space) return null;
+  const folder = placeOf(space, ps);
+  const key = JSON.stringify([space.machine ?? null, folder]);
+  const entry = shared("status.reviews")?.[key];
+  const item = entry && entry.branch === shared("status.git")?.[key]?.branch ? entry.items?.[0] : null;
+  return item ? { item, space: space.id, folder } : null;
+}
+
+// GitLab numbers its merge requests !N, GitHub its pull requests #N.
+const sign = (item) => (item.host === "gitlab" ? "!" : "#");
+const live = (item) => item.state === "open" || item.state === "draft";
+
+// A review's state and checks in words, as cc-board's In review cards say them.
+function reviewText(item) {
+  let checks = "";
+  if (live(item) && item.ci === "pending") checks = " · checks running";
+  else if (live(item) && item.ci === "pass" && !item.look.ready) checks = " · checks passed";
+  else if (live(item) && item.ci === "fail" && item.look.label !== "Checks failed") checks = " · checks failed";
+  return `${sign(item)}${item.number} ${item.look.label}${checks}`;
+}
+
+// Fix CI: a new Claude session in the card's space and checkout, asked to fix the failed checks.
+function fixCi(review) {
+  const { item } = review;
+  const checks = item.failed.map((f) => `- ${f.name}${f.url ? `: ${f.url}` : ""}`).join("\n");
+  const message = [`The CI of ${item.repository}${sign(item)}${item.number} failed: ${item.url}`,
+    ...(checks ? ["", "Failed checks:", checks] : []), "",
+    "Read the failed jobs' logs (gh or glab), find the cause and fix it on this branch."].join("\n");
+  showTerminals();
+  openOverlay({ mod: "claude-new", kind: "dialog", width: 560,
+    props: { space: review.space, folder: review.folder, worktree: false, plan: false, message } });
+}
+
 class Board {
   init(_props, cx) {
     this.handle = cx.focus_handle();
@@ -99,11 +144,13 @@ class Board {
   }
 
   // Each item's live Claude session, from the label Start put on its terminal: "key=value" ->
-  // { pane, status, where }. A terminal left with only its shell (Claude exited) doesn't count.
+  // { pane, status, where, review }. A terminal left with only its shell (Claude exited) doesn't count.
   sessions(b) {
     const keys = (b.trackers ?? []).map(t => t.labelKey);
     const byAddress = new Map(agents().map(a => [a.address, a]));
-    const tabs = new Map(spaces().flatMap(s => (s.tabs ?? []).map(c => [c.id, { space: s.name, tab: c.name, named: c.named }])));
+    const all = spaces();
+    const ps = panes();
+    const tabs = new Map(all.flatMap(s => (s.tabs ?? []).map(c => [c.id, { space: s.name, tab: c.name, named: c.named }])));
     const found = new Map();
     for (const term of terminals()) {
       const agent = term.program?.agent ? byAddress.get(term.address) : null;
@@ -115,7 +162,8 @@ class Board {
         const at = tabs.get(agent.tab);
         // An unnamed tab goes by its number: the agent's title says more, as in the tab bar.
         const tab = at?.named ? at.tab : agent.title || at?.tab || agent.tab_name;
-        found.set(label, { pane: agent.pane, status: agent.status, where: `${at?.space ?? agent.space_name} › ${tab}` });
+        found.set(label, { pane: agent.pane, status: agent.status, where: `${at?.space ?? agent.space_name} › ${tab}`,
+          review: reviewOf(all.find(s => s.id === agent.space), ps) });
       }
     }
     return found;
@@ -195,6 +243,12 @@ class Board {
           .when(Boolean(session.status), el => el.child(div().flex_none()
             .text_color(session.status === "blocked" ? t.blocked : t.muted)
             .child(session.status === "blocked" ? "needs you" : session.status)))))
+        .when(Boolean(session?.review), el => el.child(h_flex().id(`review-${item.id}`).gap(6).items_center().text_size(11.5)
+          .text_color(t[session.review.item.look.tone] ?? t.muted).cursor_pointer()
+          .tooltip(`${session.review.item.repository}${sign(session.review.item)}${session.review.item.number} · ${session.review.item.title}`)
+          .on_mouse_down("left", stop).on_click((_e, cx) => { cx.stop_propagation(); cx.open_url(session.review.item.url); })
+          .child(svg(`mods/status-hub/icons/${session.review.item.look.icon}.svg`).size(12).flex_none())
+          .child(div().flex_1().min_w(0).truncate().child(reviewText(session.review.item)))))
         .when(item.labels.length > 0 || date || Boolean(item.who), el => el.child(h_flex().flex_wrap().gap(4).items_center()
           .children(item.labels.map(l => div().px(6).h(18).flex().items_center().rounded(4).text_size(11)
             .bg(`${l.color}33`).text_color(t.foreground).child(l.title)))
@@ -204,6 +258,8 @@ class Board {
           .child(session
             ? button(`open-${item.id}`, tracker.title, () => browse())
             : button(`start-${item.id}`, "Start", () => request("board.start", { key: b.key, item, column: bare(column) })))
+          .when(Boolean(session?.review && live(session.review.item) && session.review.item.ci === "fail"),
+            el => el.child(button(`fix-${item.id}`, "Fix CI", () => fixCi(session.review))))
           .when(writable, el => el.child(button(`edit-${item.id}`, "Edit", () => this.editTask(b, column, item))))
           .when(writable && columns.length > 1, el => el.child(button(`move-${item.id}`, moving ? "Cancel" : "Move", (_e, cx) => { this.moving = moving ? null : item.id; cx.notify(); }))))
         .when(moving, el => el.child(h_flex().flex_wrap().gap(4)

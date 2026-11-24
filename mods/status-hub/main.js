@@ -18,7 +18,7 @@ export default class StatusHub extends View {
     // Cheap when nothing is due: no git runs, no task (see GitStatus.due).
     cx.timer.every(250, (cx) => {
       this.git.tick(cx);
-      this.reviews.refresh(this.git.places(), cx);
+      this.reviews.refresh(this.git.places(), this.git.takeEnded(), cx);
     });
   }
 

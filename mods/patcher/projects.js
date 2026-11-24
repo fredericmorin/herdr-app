@@ -15,6 +15,8 @@ const REFERENCE = `${START}
 //   },
 //   "board_start": { ... },                    // defaults for every repo, same shape as a project's
 //   "new_session": { ... },
+//   "github": { "account": "my-login" },       // the gh account the PR badges use (gh auth status lists them);
+//                                              // default gh's active account. Never falls back to another one
 //   "projects": {
 //     "~/code/app": {                          // the repo's main checkout (absolute or ~/)
 //       "worktrees": {                         // New worktree, in this repo
@@ -40,6 +42,7 @@ const REFERENCE = `${START}
 //                                                           // default $CLAUDE_CONFIG_DIR, else ~ (the app rarely has the former).
 //                                                           // Claude sessions Herdr starts in this repo (Board Start, Cmd+Shift+N,
 //                                                           // New worktree, forks, the + menu) get it as CLAUDE_CONFIG_DIR
+//       "github": { "account": "my-login" }                 // this repo's gh account (its worktrees too); default: top-level
 //     }
 //   }
 // }

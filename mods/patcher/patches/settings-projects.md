@@ -27,6 +27,10 @@ Made on top of: nothing. It patches only `frame/settings/main.js` in place (`to`
       Calls go through `node mods/status-hub/board/linear-mcp.mjs call`, signed in from the Board.
       A choice that isn't complete yet (a cycle with no team, a project with no URL) stays a draft
       on screen and isn't written.
+  - GitHub: *Account* (defaults and per project), the `github.account` the status hub's PR badges
+    run gh as: *Default (…)* or one of gh's github.com logins (`gh auth status --hostname github.com
+    --json hosts`, read once per opening). *Default* shows the top-level account for a project, else
+    gh's active one. A set account gh isn't logged in as gets its own `(not logged in)` choice.
 - Yes/no settings are `Default (on|off)` / `On` / `Off`. *Default* removes the key. Its label shows what
   is inherited: the top-level value for a project, else the reader's built-in.
 - Every change is written at once, in order, with a compare-and-swap write that re-reads and retries
@@ -64,8 +68,8 @@ equivalent code now lives.
   screen folder, copied from Herdr's with the patched `main.js` and our files over it.
 - Outside Settings: `mods/status-hub/board/linear-mcp.mjs` (`call <tool> <json>`, printing one JSON line
   `{ok, value}` or `{ok: false, status, error}`), Vikunja's MCP at `https://todo.endor.one/api/v2/mcp`,
-  and the shapes of `projects.json` that `mods/my-worktree`, `mods/claude-new` and `mods/issue-board`
-  read.
+  and the shapes of `projects.json` that `mods/my-worktree`, `mods/claude-new`, `mods/issue-board`
+  and `mods/status-hub` read; `gh auth status --json hosts` (`hosts["github.com"][].login`, `active`).
 
 ## How to check it works
 
@@ -79,5 +83,7 @@ equivalent code now lives.
   and the Board shows it.
 - Board → Linear → Team cycle → a team writes `{ "team": …, "cycle": true }`. Project with no URL writes
   nothing until one is picked or pasted.
+- GitHub → Account lists gh's logins. Picking one writes `"github": { "account": "<login>" }` in that
+  project (or at the top for Defaults); a project's *Default* label names the top-level account.
 - Add a stray comma to `projects.json`: the section shows the error and writes nothing.
 - Restart Herdr: Settings still has Projects (the patcher re-applies on Herdr's fresh `frame/settings`).

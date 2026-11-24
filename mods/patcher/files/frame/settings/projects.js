@@ -1,5 +1,6 @@
 // Settings → Projects: edits ~/.config/herdr-app/projects.json, the per-project settings read by the
-// patched worktree dialog (worktrees), claude-new (board_start, new_session) and the Board (board).
+// patched worktree dialog (worktrees), claude-new (board_start, new_session), the Board (board) and the
+// status hub's PR badges (github).
 // mods/patcher installs it from mods/patcher/files/ beside the Settings screen; its settings-projects
 // patch hooks it in. Every setting here is also in REFERENCE in mods/patcher/projects.js: keep both in step.
 // Each change is written at once (no Save step), like the rest of Settings: the reference block at the
@@ -38,7 +39,7 @@ const FLAGS = [
   { group: "new_session", name: "plan", title: "New session: Plan mode",
     about: "Cmd+Shift+N and New worktree start the Claude session in Plan mode.", builtIn: false },
 ];
-const GROUPS = ["worktrees", "board_start", "new_session", "board"];
+const GROUPS = ["worktrees", "board_start", "new_session", "board", "github"];
 const TRACKERS = [[null, "None"], ["vikunja", "Vikunja"], ["linear", "Linear"]];
 // A Linear board's scope: the key it sets in "linear": { … }.
 const KINDS = [["mine", "My issues"], ["cycle", "Team cycle"], ["project", "Project"], ["view", "View"]];
@@ -115,6 +116,24 @@ async function vikunjaProjects(claude) {
     return names.join(" › ");
   };
   return all.map((p) => ({ value: p.id, label: path(p), detail: `#${p.id}` })).sort((a, b) => a.label.localeCompare(b.label));
+}
+
+// gh's logins on github.com, for the GitHub account picker: [{ value, label, active }].
+async function ghAccounts() {
+  let r;
+  try {
+    r = await exec("gh", ["auth", "status", "--hostname", "github.com", "--json", "hosts"]);
+  } catch {
+    throw new Error("gh isn't installed.");
+  }
+  let hosts;
+  try {
+    hosts = JSON.parse(r.stdout).hosts?.["github.com"] ?? [];
+  } catch {
+    throw new Error((r.stderr || `gh exited ${r.code}`).trim());
+  }
+  if (!hosts.length) throw new Error("gh has no github.com login: run gh auth login.");
+  return hosts.map((h) => ({ value: h.login, label: h.login, active: Boolean(h.active) }));
 }
 
 // Drops empty groups ({}), at the top and in each project; an empty project stays (it was added).
@@ -400,6 +419,7 @@ export class ProjectsSection {
         cx.notify();
       });
     };
+    fetch("github", ghAccounts);
     if (tracker === "vikunja") fetch(vikunjaList(p), () => vikunjaProjects(claudeOf(p)));
     if (tracker !== "linear") return;
     fetch("teams", async () => ((await linear("list_teams", { limit: 250 })).teams ?? [])
@@ -523,6 +543,22 @@ export class ProjectsSection {
         own, (v, cx) => this.set(key, f.group, f.name, v, cx)));
   }
 
+  // The gh account for the PR badges: Default (inherited) or one of gh's logins.
+  github(t, key, scope) {
+    const own = isObject(scope?.github) ? scope.github.account : undefined;
+    const top = isObject(this.file?.github) ? this.file.github.account : undefined;
+    const about = `The account gh uses for ${key ? "this repo's" : "every repo's"} pull request badges. No other account is tried.`;
+    const odd = own !== undefined && typeof own !== "string";
+    return this.host.row(t, "Account", odd ? `${about} Not understood: ${JSON.stringify(own)}.` : about,
+      this.listed(t, "github", (logins) => {
+        const active = logins.find((l) => l.active)?.value;
+        const inherited = key && typeof top === "string" ? top : active ? `active: ${active}` : "gh's active one";
+        const options = [[undefined, `Default (${inherited})`], ...logins.map((l) => [l.value, l.label])];
+        if (typeof own === "string" && !logins.some((l) => l.value === own)) options.push([own, `${own} (not logged in)`]);
+        return this.segments(t, "st-pj-gh", options, own, (v, cx) => this.set(key, "github", "account", v, cx));
+      }));
+  }
+
   board(t, p) {
     const tracker = this.trackerOf(p);
     const rows = [this.host.row(t, "Tracker", tracker === "?" ? `Not understood: ${JSON.stringify(p.board)}. Pick one to replace it.`
@@ -605,6 +641,7 @@ export class ProjectsSection {
     }
     page.child(this.flag(t, key, scope, FLAGS[0]));
     page.child(div().h(14)).child(this.host.heading(t, "Claude sessions")).children(FLAGS.slice(1).map((f) => this.flag(t, key, scope, f)));
+    page.child(div().h(14)).child(this.host.heading(t, "GitHub")).child(this.github(t, key, scope));
     if (key) page.child(div().h(14)).child(this.host.heading(t, "Board")).children(this.board(t, p));
     return page;
   }

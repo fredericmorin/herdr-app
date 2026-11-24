@@ -52,8 +52,8 @@ diff -ruN a/mods/spaces/main.js b/mods/spaces/main.js
    compact({ w, i }, t) {
 diff -ruN a/mods/spaces/pr-status.js b/mods/spaces/pr-status.js
 --- a/mods/spaces/pr-status.js	1969-12-31 19:00:00
-+++ b/mods/spaces/pr-status.js	2026-11-23 22:09:57
-@@ -0,0 +1,58 @@
++++ b/mods/spaces/pr-status.js	2026-11-23 23:04:45
+@@ -0,0 +1,80 @@
 +// The badge a space row shows for its branch's pull request (GitHub) or merge request
 +// (GitLab). The status hub (mods/status-hub) finds them and publishes `status.reviews`;
 +// this only draws an entry.
@@ -72,6 +72,24 @@ diff -ruN a/mods/spaces/pr-status.js b/mods/spaces/pr-status.js
 +// GitLab numbers its merge requests !N, GitHub its pull requests #N.
 +const sign = (item) => (item.host === "gitlab" ? "!" : "#");
 +
++// An open or draft one's CI, beside its number: a ring while it runs, a dot once it passed or
++// failed. The icon's color stays the review state; ready to merge already says CI passed (✓).
++function ciMark(item, t) {
++  if (item.look.ready || (item.state !== "open" && item.state !== "draft")) return null;
++  if (item.ci === "pending") return div().size(7).flex_none().rounded(4).border_1().border_color(t.working);
++  if (item.ci === "pass") return div().size(6).flex_none().rounded(3).bg(t.ansi2);
++  if (item.ci === "fail") return div().size(6).flex_none().rounded(3).bg(t.ansi1);
++  return null;
++}
++
++// The tooltip's CI line, empty without CI.
++function ciLine(item) {
++  if (item.ci === "pending") return "\nChecks running";
++  if (item.ci === "pass") return "\nChecks passed";
++  if (item.ci === "fail") return `\nChecks failed${item.failed.length ? `: ${item.failed.map((f) => f.name).join(", ")}` : ""}`;
++  return "";
++}
++
 +// The badge at the right of a space row: icon and number in the state's color, from a
 +// hub entry `{ branch, items, error? }`. An empty element when there's nothing to show.
 +export function prBadge(id, entry, t) {
@@ -88,6 +106,8 @@ diff -ruN a/mods/spaces/pr-status.js b/mods/spaces/pr-status.js
 +  const shortcut = window().platform === "macos" ? "Cmd" : "Ctrl";
 +  const stale = entry.error ? `\nMay be stale: ${entry.error}` : "";
 +  const more = items.slice(1).map((p) => `\n+ ${p.repository}${sign(p)}${p.number} · ${p.title}`).join("");
++  const mark = ciMark(item, t);
++  const extra = `${look.ready ? "✓" : ""}${items.length > 1 ? `${look.ready ? " " : ""}+${items.length - 1}` : ""}`;
 +  return h_flex()
 +    .id(`${id}-pr`)
 +    .flex_none()
@@ -96,7 +116,7 @@ diff -ruN a/mods/spaces/pr-status.js b/mods/spaces/pr-status.js
 +    .text_size(11)
 +    .text_color(t[look.tone] ?? t.dim)
 +    .cursor_pointer()
-+    .tooltip(`${item.repository}${sign(item)}${item.number} · ${look.label}\n${item.title}${more}${stale}\n${shortcut}-click to open`)
++    .tooltip(`${item.repository}${sign(item)}${item.number} · ${look.label}${ciLine(item)}\n${item.title}${more}${stale}\n${shortcut}-click to open`)
 +    // Stop modified presses so the row neither starts a drag nor selects.
 +    .on_mouse_down("left", (event, cx) => {
 +      if (linkClick(event)) cx.stop_propagation();
@@ -110,5 +130,7 @@ diff -ruN a/mods/spaces/pr-status.js b/mods/spaces/pr-status.js
 +      cx.open_url(item.url);
 +    })
 +    .child(svg(`mods/status-hub/icons/${look.icon}.svg`).size(13).flex_none())
-+    .child(`${sign(item)}${item.number}${look.ready ? " ✓" : ""}${items.length > 1 ? ` +${items.length - 1}` : ""}`);
++    .child(`${sign(item)}${item.number}`)
++    .when(Boolean(mark), (el) => el.child(mark))
++    .when(Boolean(extra), (el) => el.child(extra));
 +}

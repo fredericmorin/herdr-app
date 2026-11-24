@@ -55,17 +55,28 @@ export class GitStatus {
     this.busy = {}; // pane -> an agent working or a program in front of its shell
     this.ready = {}; // machine -> its layout was readable at the last look
     this.at = {}; // space -> its where() at the last look
+    this.ended = new Set(); // where()s where a command or an agent's turn ended since takeEnded()
     this.watching = new Map(); // local repos' pending folder watches
     this.published = { git: "", worktrees: "" };
   }
 
-  // Each space's place and branch, for the review lookups.
+  // Each space's place and branch, for the review lookups. `main`: the repo's main checkout
+  // (projects.json's key), null on another machine (those keys are this computer's paths).
   places() {
     const ps = panes();
     return spaces().map((s) => {
       const key = where(s, ps);
-      return { key, machine: s.machine, folder: place(s, ps), branch: this.git[key]?.branch, repo: Boolean(this.git[key]) };
+      const g = this.git[key];
+      const main = g && !s.machine ? JSON.parse(g.repo)[1].replace(/\/\.git$/, "") : null;
+      return { key, machine: s.machine, folder: place(s, ps), branch: g?.branch, repo: Boolean(g), main };
     });
+  }
+
+  // The places where a command or an agent's turn ended since the last call (a push, a new PR).
+  takeEnded() {
+    const ended = [...this.ended];
+    this.ended.clear();
+    return ended;
   }
 
   tick(cx) {
@@ -108,7 +119,10 @@ export class GitStatus {
     for (const p of ps) {
       if (!p.terminal || !spaceOf[p.tab]) continue;
       busy[p.pane] = p.status === "working" || !(p.program?.shell || p.program?.agent);
-      if (this.busy[p.pane] && !busy[p.pane]) this.sameRepo(at[spaceOf[p.tab].id], keys).forEach((k) => due.add(k));
+      if (this.busy[p.pane] && !busy[p.pane]) {
+        this.sameRepo(at[spaceOf[p.tab].id], keys).forEach((k) => due.add(k));
+        this.ended.add(at[spaceOf[p.tab].id]);
+      }
     }
     this.busy = busy;
     for (const m of machines()) {

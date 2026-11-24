@@ -70,18 +70,27 @@ Review = { host: "github" | "gitlab", repository, number, title, url,
   `number`: the PR number, or the MR's iid: show GitLab ones as `!N`, GitHub ones as `#N`.
 - `look`: what a badge shows. `icon` is a file in `mods/status-hub/icons/` (`pull-request`,
   `draft`, `merged`, `closed`); `tone` is a theme color name (draw `theme()[look.tone]`);
-  `label` says the state ("Ready to merge", "Checks failed", …); `ready`: mergeable now.
-- Updates once a minute per place, and at once when its branch changes.
+  `label` says the state ("Ready to merge", "Needs approval", "Checks failed", …); `ready`:
+  mergeable now. "Needs approval": GitHub's `reviewDecision` `REVIEW_REQUIRED`, GitLab's
+  `detailed_merge_status` `not_approved` (blue, `ansi4`). `look` is the review state; `ci`
+  is drawn beside it (my-spaces' dot).
+- Updates once a minute per place, at once when its branch changes, and when a command or an
+  agent's turn ends there (`GitStatus.takeEnded()`; not cached, at most every 10 s per place).
 - GitHub: every github.com remote, `gh pr list --head <branch>`, heads in the checkout's
   own remotes only; `git config branch.<b>.herdr-pr owner/repo#42` binds one PR instead.
+  gh runs as `projects.json`'s `github.account` for the repo (its main checkout's entry, else
+  the top level's; `board/config.js` `githubAccount()`), through
+  `sh -c 'GH_TOKEN=$(gh auth token --user …) exec gh …'`, so the token is never on a command
+  line. No account set: gh's active account. A set account gh has no login for is an error
+  (`no oauth token found for github.com account …`); no other account is tried. Spaces on
+  another machine use the top-level account only.
 - GitLab: remotes on gitlab.com or a host containing `gitlab`; `glab mr list
   --source-branch`, then `glab mr view` for open ones (pipeline, conflicts, merge status);
-  sources in the checkout's own remotes only (by project id).
-  **The glab flags and JSON fields come from glab's docs and haven't been tried against
-  a live GitLab** (glab wasn't installed when this was written); only the
-  `"glab not installed"` path is verified.
+  sources in the checkout's own remotes only (by project id). Tried against gitlab.com
+  with glab 1.131.
 - Git runs on the space's machine; gh and glab run on this computer.
-- Readers: my-spaces' PR badge (step 3), the status bar (step 5).
+- Readers: my-spaces' PR badge (step 3), the status bar (step 5), the Board's cards
+  (`mods/issue-board`: a card's session's space, and its Fix CI button).
 
 ### `status.board`
 

@@ -62,7 +62,7 @@ diff -ruN a/mods/spaces/main.js b/mods/spaces/main.js
 diff -ruN a/mods/spaces/pr-status.js b/mods/spaces/pr-status.js
 --- a/mods/spaces/pr-status.js	1969-12-31 19:00:00
 +++ b/mods/spaces/pr-status.js	2026-11-24 09:45:35
-@@ -0,0 +1,80 @@
+@@ -0,0 +1,82 @@
 +// The badge a space row shows for its branch's pull request (GitHub) or merge request
 +// (GitLab). The status hub (mods/status-hub) finds them and publishes `status.reviews`;
 +// this only draws an entry.
@@ -125,7 +125,7 @@ diff -ruN a/mods/spaces/pr-status.js b/mods/spaces/pr-status.js
 +    .text_size(11)
 +    .text_color(t[look.tone] ?? t.dim)
 +    .cursor_pointer()
-+    .tooltip(`${item.repository}${sign(item)}${item.number} · ${look.label}${ciLine(item)}\n${item.title}${more}${stale}\n${shortcut}-click to open`)
++    .tooltip(`${item.repository}${sign(item)}${item.number} · ${look.label}${item.autoMerge ? "\nAuto-merge on" : ""}${ciLine(item)}\n${item.title}${more}${stale}\n${shortcut}-click to open`)
 +    // Stop modified presses so the row neither starts a drag nor selects.
 +    .on_mouse_down("left", (event, cx) => {
 +      if (linkClick(event)) cx.stop_propagation();
@@ -138,7 +138,9 @@ diff -ruN a/mods/spaces/pr-status.js b/mods/spaces/pr-status.js
 +      cx.stop_propagation();
 +      cx.open_url(item.url);
 +    })
-+    .child(svg(`mods/status-hub/icons/${look.icon}.svg`).size(13).flex_none())
++    // Auto-merge's clock is blue whatever the state; the number keeps the state's color.
++    .child(svg(`mods/status-hub/icons/${look.icon}.svg`).size(13).flex_none()
++      .when(Boolean(item.autoMerge), (el) => el.text_color(t.ansi4)))
 +    .child(`${sign(item)}${item.number}`)
 +    .when(Boolean(mark), (el) => el.child(mark))
 +    .when(Boolean(extra), (el) => el.child(extra));

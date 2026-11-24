@@ -15,7 +15,7 @@ const NUDGE_GAP_MS = 10000;
 // $0 is the account, "$@" gh's arguments.
 const AS_ACCOUNT = 't=$(gh auth token --hostname github.com --user "$0") || exit; GH_TOKEN=$t exec gh "$@"';
 const PR_FIELDS =
-  "id,number,title,url,state,isDraft,headRefName,headRepository,updatedAt,statusCheckRollup,reviewDecision,mergeStateStatus";
+  "id,number,title,url,state,isDraft,headRefName,headRepository,updatedAt,statusCheckRollup,reviewDecision,mergeStateStatus,autoMergeRequest";
 const PR_LIST_FIELDS = "id,number,headRefName,headRepository";
 const PIPELINE_PENDING = new Set(["running", "pending", "created", "waiting_for_resource", "preparing", "scheduled"]);
 
@@ -34,6 +34,7 @@ function ciState(rollup) {
 
 // Terminal PR states win over draft/CI flags left over from when it was open.
 // `tone` is a theme color name: readers draw it as theme()[tone].
+// An open one set to merge by itself shows a clock instead of the PR icon; tone and label stay its state's.
 function prAppearance(pr) {
   if (pr.state === "MERGED") return { icon: "merged", tone: "ansi5", label: "Merged" };
   if (pr.state === "CLOSED") return { icon: "closed", tone: "ansi1", label: "Closed" };
@@ -43,7 +44,8 @@ function prAppearance(pr) {
       String(check.conclusion || check.state || check.status).toUpperCase(),
     ),
   );
-  const open = (tone, label, ready = false) => ({ icon: "pull-request", tone, label, ready });
+  const icon = pr.autoMergeRequest ? "auto-merge" : "pull-request";
+  const open = (tone, label, ready = false) => ({ icon, tone, label, ready });
   if (pr.mergeStateStatus === "DIRTY") return open("ansi1", "Conflicts");
   if (failed) return open("ansi1", "Checks failed");
   if (pr.reviewDecision === "CHANGES_REQUESTED") return open("ansi3", "Changes requested");
@@ -60,7 +62,8 @@ function githubItem(pr) {
   return {
     host: "github", repository: pr.repository, number: pr.number, title: pr.title,
     url: pr.url || `https://github.com/${pr.repository}/pull/${pr.number}`,
-    state, ci, failed, updatedAt: pr.updatedAt ?? null, look: prAppearance(pr),
+    state, ci, failed, autoMerge: state === "open" && Boolean(pr.autoMergeRequest),
+    updatedAt: pr.updatedAt ?? null, look: prAppearance(pr),
   };
 }
 
@@ -69,7 +72,8 @@ function mrAppearance(state, ci, mr) {
   if (state === "merged") return { icon: "merged", tone: "ansi5", label: "Merged" };
   if (state === "closed") return { icon: "closed", tone: "ansi1", label: "Closed" };
   if (state === "draft") return { icon: "draft", tone: "dim", label: "Draft" };
-  const open = (tone, label, ready = false) => ({ icon: "pull-request", tone, label, ready });
+  const icon = mr.merge_when_pipeline_succeeds ? "auto-merge" : "pull-request";
+  const open = (tone, label, ready = false) => ({ icon, tone, label, ready });
   if (mr.has_conflicts) return open("ansi1", "Conflicts");
   if (ci === "fail") return open("ansi1", "Checks failed");
   if (mr.detailed_merge_status === "requested_changes") return open("ansi3", "Changes requested");
@@ -88,7 +92,8 @@ function gitlabItem(mr, repository) {
   const failed = ci === "fail" ? [{ name: "pipeline", url: mr.head_pipeline.web_url ?? null }] : [];
   return {
     host: "gitlab", repository, number: mr.iid, title: mr.title, url: mr.web_url,
-    state, ci, failed, updatedAt: mr.updated_at ?? null, look: mrAppearance(state, ci, mr),
+    state, ci, failed, autoMerge: state === "open" && Boolean(mr.merge_when_pipeline_succeeds),
+    updatedAt: mr.updated_at ?? null, look: mrAppearance(state, ci, mr),
   };
 }
 

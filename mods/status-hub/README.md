@@ -57,7 +57,7 @@ value changed.
 Review = { host: "github" | "gitlab", repository, number, title, url,
            state: "open" | "draft" | "merged" | "closed",
            ci: "pass" | "fail" | "pending" | "none", failed: [{ name, url }],
-           updatedAt, look: { icon, tone, label, ready } }
+           autoMerge, updatedAt, look: { icon, tone, label, ready } }
 ```
 
 - `where`: as in `status.git`; only places that are git repos. `branch`: the branch the
@@ -69,11 +69,14 @@ Review = { host: "github" | "gitlab", repository, number, title, url,
 - `repository`: `owner/repo` on GitHub, the project path (nested groups) on GitLab.
   `number`: the PR number, or the MR's iid: show GitLab ones as `!N`, GitHub ones as `#N`.
 - `look`: what a badge shows. `icon` is a file in `mods/status-hub/icons/` (`pull-request`,
-  `draft`, `merged`, `closed`); `tone` is a theme color name (draw `theme()[look.tone]`);
+  `auto-merge`, `draft`, `merged`, `closed`); `tone` is a theme color name (draw `theme()[look.tone]`);
   `label` says the state ("Ready to merge", "Needs approval", "Checks failed", …); `ready`:
   mergeable now. "Needs approval": GitHub's `reviewDecision` `REVIEW_REQUIRED`, GitLab's
   `detailed_merge_status` `not_approved` (blue, `ansi4`). `look` is the review state; `ci`
   is drawn beside it (my-spaces' dot).
+- `autoMerge`: an open one is set to merge by itself once it can (GitHub's `autoMergeRequest`,
+  GitLab's `merge_when_pipeline_succeeds`). Its `look.icon` is then `auto-merge` (a clock)
+  instead of `pull-request`; `tone` and `label` stay the review state's.
 - Updates once a minute per place, at once when its branch changes, and when a command or an
   agent's turn ends there (`GitStatus.takeEnded()`; not cached, at most every 10 s per place).
 - GitHub: every github.com remote, `gh pr list --head <branch>`, heads in the checkout's

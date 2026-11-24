@@ -9,6 +9,7 @@ import { exec, setShared } from "herdr";
 const PR_POLL_MS = 60000;
 const PR_FIELDS =
   "id,number,title,url,state,isDraft,headRefName,headRepository,updatedAt,statusCheckRollup,reviewDecision,mergeStateStatus";
+const PR_LIST_FIELDS = "id,number,headRefName,headRepository";
 const PIPELINE_PENDING = new Set(["running", "pending", "created", "waiting_for_resource", "preparing", "scheduled"]);
 
 const FAILED = new Set(["FAILURE", "CANCELLED", "TIMED_OUT", "ACTION_REQUIRED", "ERROR", "STARTUP_FAILURE"]);
@@ -204,13 +205,15 @@ export class ReviewStatus {
     const candidates = [];
     const knownHeads = new Set([...github].map((repo) => repo.toLowerCase()));
     for (const repository of github) {
+      // Cheap fields first: full fields on a busy branch like a fork-heavy repo's `main` make GitHub 502.
       const found = await this.gh([
-        "pr", "list", "--repo", repository, "--head", branch, "--state", "all", "--limit", "100", "--json", PR_FIELDS,
+        "pr", "list", "--repo", repository, "--head", branch, "--state", "all", "--limit", "100", "--json", PR_LIST_FIELDS,
       ]);
-      for (const pr of found) {
+      for (const head of found) {
         // Branch names aren't unique across forks: only heads in this checkout's own remotes.
-        if (pr.headRefName === branch && knownHeads.has(pr.headRepository?.nameWithOwner?.toLowerCase()))
-          candidates.push({ ...githubItem({ ...pr, repository }), id: pr.id ?? `${repository}#${pr.number}` });
+        if (head.headRefName !== branch || !knownHeads.has(head.headRepository?.nameWithOwner?.toLowerCase())) continue;
+        const pr = await this.gh(["pr", "view", String(head.number), "--repo", repository, "--json", PR_FIELDS]);
+        candidates.push({ ...githubItem({ ...pr, repository }), id: head.id ?? `${repository}#${head.number}` });
       }
     }
     if (gitlab.size) candidates.push(...await this.mergeRequests([...gitlab.values()], branch));

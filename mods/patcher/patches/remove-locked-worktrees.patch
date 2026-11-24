@@ -1,6 +1,6 @@
 diff -ru a/layouts/main.json b/layouts/main.json
---- a/layouts/main.json	2026-11-19 14:49:38
-+++ b/layouts/main.json	2026-11-19 14:49:45
+--- a/layouts/main.json	2026-11-24 09:41:10
++++ b/layouts/main.json	2026-11-24 09:41:10
 @@ -57,6 +57,17 @@
                }
              },
@@ -30,8 +30,8 @@ diff -ru a/layouts/main.json b/layouts/main.json
              "px": 69
            },
 diff -ru a/mods/worktree/main.js b/mods/worktree/main.js
---- a/mods/worktree/main.js	2026-11-23 08:54:10
-+++ b/mods/worktree/main.js	2026-11-23 09:00:09
+--- a/mods/worktree/main.js	2026-11-24 09:41:10
++++ b/mods/worktree/main.js	2026-11-24 09:42:20
 @@ -110,6 +110,28 @@
    return { mods, unpushed };
  }
@@ -94,24 +94,22 @@ diff -ru a/mods/worktree/main.js b/mods/worktree/main.js
 +      return `It's locked now${lockedBy(locked)}. Enter again removes it anyway.`;
 +    }
  
-     // Git on a remote Windows machine reports a drive-letter or UNC path.
-     const windows = this.on ? /^(?:[A-Za-z]:\/|\/\/)/.test(this.repo.top) : window().platform === "windows";
-@@ -253,9 +277,11 @@
-     // A shell sitting in the folder can keep it busy on Windows.
-     if (windows) closeSpace();
+     if (s?.id) {
+       const tabs = new Set(s.tabs.map((tab) => tab.id));
+@@ -259,8 +283,10 @@
+       await cx.sleep(50);
+     }
      const force = this.dirty || mods.length > 0;
 -    const r = await git(this.repo.main, ["worktree", "remove", ...(force ? ["--force"] : []), this.repo.top], this.on, 600_000);
 -    if (!r.ok) return r.err || "git worktree remove failed.";
--    if (!windows) closeSpace();
 +    // git removes a locked worktree only with --force twice, which also covers changes and submodules.
 +    const forced = this.locked !== null ? ["--force", "--force"] : force ? ["--force"] : [];
 +    // In the background, then the branch when project-worktree-settings picked one (this.branch); a toast says how it went.
-+    // Elsewhere than Windows, the job closes the space once the worktree is gone.
-+    queueRemoval({ kind: "remove", on: this.on ?? null, main: this.repo.main, top: this.repo.top, forced, branch: this.branch?.name ?? null, space: windows ? null : s?.id ?? null });
++    queueRemoval({ kind: "remove", on: this.on ?? null, main: this.repo.main, top: this.repo.top, forced, branch: this.branch?.name ?? null });
      return "";
    }
  
-@@ -369,6 +395,7 @@
+@@ -374,6 +400,7 @@
        .child(div().text_color(t.muted).child(detail))
        .when(remove && this.dirty, (el) => el.child(div().text_color(t.blocked).child("It has uncommitted changes: they will be lost.")))
        .when(remove && this.unpushed.length > 0, (el) => el.child(div().text_color(t.blocked).child(`Submodule ${this.unpushed.join(", ")} has commits that aren't pushed anywhere: they will be lost.`)))

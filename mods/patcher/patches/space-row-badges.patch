@@ -1,6 +1,6 @@
 diff -ruN a/mods/spaces/claude-icons.js b/mods/spaces/claude-icons.js
 --- a/mods/spaces/claude-icons.js	1969-12-31 19:00:00
-+++ b/mods/spaces/claude-icons.js	2026-11-23 23:26:21
++++ b/mods/spaces/claude-icons.js	2026-11-24 09:41:10
 @@ -0,0 +1,27 @@
 +// A space row's Claude Code sessions: one icon per agent in the space whose program is Claude,
 +// in the theme's blocked color while it needs you, its done color once it finished unseen,
@@ -30,8 +30,8 @@ diff -ruN a/mods/spaces/claude-icons.js b/mods/spaces/claude-icons.js
 +  return el.when(a.status === "idle", (e) => e.opacity(0.4));
 +}
 diff -ruN a/mods/spaces/main.js b/mods/spaces/main.js
---- a/mods/spaces/main.js	2026-11-23 23:26:14
-+++ b/mods/spaces/main.js	2026-11-23 23:26:14
+--- a/mods/spaces/main.js	2026-11-24 09:41:10
++++ b/mods/spaces/main.js	2026-11-24 09:42:20
 @@ -6,6 +6,8 @@
  import { View, div, svg } from "gpui-kit";
  import { v_flex, h_flex, ScrollHandle } from "gpui-base";
@@ -41,9 +41,9 @@ diff -ruN a/mods/spaces/main.js b/mods/spaces/main.js
  
  function find(node, id) {
    if (node?.id === id) return node;
-@@ -501,8 +503,16 @@
+@@ -515,8 +517,16 @@
            .when(Boolean(tree), el => el.pl(22).child(svg("mods/workspace-chrome/branch.svg").size(13).flex_none().text_color(t.dim)))
-           .when(!tree, el => el.child(h_flex().size(18).flex_none().rounded(5).bg(fill).items_center().justify_center().text_size(10.5).font_bold().text_color("#ffffff").child([...w.name][0]?.toUpperCase() ?? "?")))
+           .when(!tree, el => el.child(h_flex().size(18).flex_none().rounded(5).bg(fill).items_center().justify_center().text_size(10.5).font_bold().text_color("#ffffff").child(spaceAvatar(w.name))))
            .child(div().flex_initial().min_w(SIDE_MIN).truncate().text_color(t.foreground).child(w.name))
 -          .child(g ? this.gitTail(g, tree, w.name, t) : div().flex_1()),
 +          .children(claudeIcons(w.id, t))
@@ -61,7 +61,7 @@ diff -ruN a/mods/spaces/main.js b/mods/spaces/main.js
    compact({ w, i }, t) {
 diff -ruN a/mods/spaces/pr-status.js b/mods/spaces/pr-status.js
 --- a/mods/spaces/pr-status.js	1969-12-31 19:00:00
-+++ b/mods/spaces/pr-status.js	2026-11-23 23:26:14
++++ b/mods/spaces/pr-status.js	2026-11-24 09:45:35
 @@ -0,0 +1,80 @@
 +// The badge a space row shows for its branch's pull request (GitHub) or merge request
 +// (GitLab). The status hub (mods/status-hub) finds them and publishes `status.reviews`;
@@ -74,7 +74,7 @@ diff -ruN a/mods/spaces/pr-status.js b/mods/spaces/pr-status.js
 +
 +// Cmd-click on macOS, Ctrl-click elsewhere, opens the PR; a plain click is the row's.
 +const linkClick = (event) =>
-+  window().platform === "macos"
++  window()?.platform === "macos"
 +    ? Boolean(event.modifiers?.platform)
 +    : Boolean(event.modifiers?.control || event.modifiers?.platform);
 +
@@ -112,7 +112,7 @@ diff -ruN a/mods/spaces/pr-status.js b/mods/spaces/pr-status.js
 +  }
 +  const item = items[0];
 +  const look = item.look;
-+  const shortcut = window().platform === "macos" ? "Cmd" : "Ctrl";
++  const shortcut = window()?.platform === "macos" ? "Cmd" : "Ctrl";
 +  const stale = entry.error ? `\nMay be stale: ${entry.error}` : "";
 +  const more = items.slice(1).map((p) => `\n+ ${p.repository}${sign(p)}${p.number} · ${p.title}`).join("");
 +  const mark = ciMark(item, t);

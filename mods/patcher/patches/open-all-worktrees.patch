@@ -1,7 +1,7 @@
 diff -ru a/mods/menu/main.js b/mods/menu/main.js
---- a/mods/menu/main.js	2026-11-18 23:32:56
-+++ b/mods/menu/main.js	2026-11-18 23:32:56
-@@ -63,7 +63,7 @@
+--- a/mods/menu/main.js	2026-11-24 09:41:10
++++ b/mods/menu/main.js	2026-11-24 09:41:10
+@@ -64,7 +64,7 @@
      case "space":
        return [
          ["Rename", "space.rename", { id: tg.id }],
@@ -11,22 +11,29 @@ diff -ru a/mods/menu/main.js b/mods/menu/main.js
          ["Close", "space.close", { id: tg.id }],
        ];
 diff -ru a/mods/new-menu/main.js b/mods/new-menu/main.js
---- a/mods/new-menu/main.js	2026-11-22 11:04:36
-+++ b/mods/new-menu/main.js	2026-11-22 11:05:23
-@@ -52,3 +52,3 @@
+--- a/mods/new-menu/main.js	2026-11-24 09:41:10
++++ b/mods/new-menu/main.js	2026-11-24 09:41:10
+@@ -50,7 +50,7 @@
+     const space = spaces().find(s => s.active);
+     const installed = this.agents.filter(a => a.installed);
      const choices = this.failed ? installed : [...installed, ...this.agents.filter(a => !a.installed).slice(0, 2)];
 -    return v_flex().min_h(0).w_full().h(Math.min(491, 167 + Math.max(1, choices.length + (this.failed ? 1 : 0)) * 31)).bg(t.popover).p(5).text_size(12.8)
 +    return v_flex().min_h(0).w_full().h(Math.min(522, 198 + Math.max(1, choices.length + (this.failed ? 1 : 0)) * 31)).bg(t.popover).p(5).text_size(12.8)
        .id("new-menu").track_focus(this.handle)
-@@ -70,3 +70,4 @@
+       .on_key_down((e) => {
+         if (e.modifiers.control || e.modifiers.platform || e.modifiers.alt) return;
+@@ -68,6 +68,7 @@
+       .child(div().h(1).mx(4).my(5).bg(t.border))
+       .child(this.row("space", div().w(14).child("+"), "New space", () => run("space.new"), shortcut("space.new")))
        .child(this.row("worktree", svg("mods/workspace-chrome/branch.svg").size(14), "New worktree…", () => openOverlay({ mod: "my-worktree", kind: "dialog", width: 460, height: 280, props: { space: space?.id, folder: panes().find(p => p.focused)?.cwd, action: "new" } }), "", Boolean(space)))
 -      .child(this.row("worktree-open", svg("mods/workspace-chrome/branch.svg").size(14), "Open worktree\u2026", () => openOverlay({ mod: "my-worktree", kind: "dialog", width: 560, height: 480, props: { space: space?.id, folder: panes().find(p => p.focused)?.cwd, action: "open" } }), "", Boolean(space)));
 +      .child(this.row("worktree-open", svg("mods/workspace-chrome/branch.svg").size(14), "Open worktree\u2026", () => openOverlay({ mod: "my-worktree", kind: "dialog", width: 560, height: 480, props: { space: space?.id, folder: panes().find(p => p.focused)?.cwd, action: "open" } }), "", Boolean(space)))
 +      .child(this.row("worktree-open-all", svg("mods/workspace-chrome/branch.svg").size(14), "Open all worktrees", () => openOverlay({ mod: "my-worktree", kind: "dialog", width: 440, height: 260, props: { space: space?.id, folder: panes().find(p => p.focused)?.cwd, action: "open-all" } }), "", Boolean(space)));
    }
+ }
 diff -ru a/mods/tabs/main.js b/mods/tabs/main.js
---- a/mods/tabs/main.js	2026-11-18 23:32:56
-+++ b/mods/tabs/main.js	2026-11-18 23:32:56
+--- a/mods/tabs/main.js	2026-11-24 09:41:10
++++ b/mods/tabs/main.js	2026-11-24 09:41:10
 @@ -147,7 +147,7 @@
        .child(h_flex().id("tab-scroll").flex_1().min_w(0).h_full().items_center().gap(3).overflow_x_scrollbar().track_scroll(this.scroll)
          .on_size_change((_size, cx) => { if (active >= 0) { this.scroll.scroll_to_item(active); cx.notify(); } })
@@ -37,14 +44,14 @@ diff -ru a/mods/tabs/main.js b/mods/tabs/main.js
        .when(enabled.includes("changes"), el => el.child(panelButton("changes", "Changes", "mods/changes/changes.svg")))
        .when(w?.buttons, el => el.child(button("minimize", w.platform === "windows" ? svg("mods/tabs/win-min.svg").size(16) : "−", () => run("window.minimize")))
 diff -ru a/mods/worktree/main.js b/mods/worktree/main.js
---- a/mods/worktree/main.js	2026-11-23 08:54:10
-+++ b/mods/worktree/main.js	2026-11-23 08:55:39
+--- a/mods/worktree/main.js	2026-11-24 09:41:10
++++ b/mods/worktree/main.js	2026-11-24 09:42:20
 @@ -3,7 +3,7 @@
  
  import { View, div } from "gpui-kit";
  import { v_flex, h_flex, InputState, Input, Scrollbar } from "gpui-base";
--import { run, props, closeOverlay, theme, spaces, panes, exec, home, appHome, readTextFile, window } from "herdr";
-+import { run, props, closeOverlay, theme, spaces, panes, exec, home, appHome, readTextFile, window, notify } from "herdr";
+-import { run, props, closeOverlay, theme, spaces, panes, terminals, exec, home, appHome, readTextFile } from "herdr";
++import { run, props, closeOverlay, theme, spaces, panes, terminals, exec, home, appHome, readTextFile, notify } from "herdr";
  
  // Where a space is now: its first terminal's live folder, else where it was made.
  function place(s, all = panes()) {
@@ -81,4 +88,4 @@ diff -ru a/mods/worktree/main.js b/mods/worktree/main.js
 +    this.close();
    }
  
-   async remove() {
+   async remove(cx) {

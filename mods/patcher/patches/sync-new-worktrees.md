@@ -31,7 +31,7 @@ so a space you close stays closed. Local repos are watched; every repo is looked
     before it (a separate import, so this patch doesn't share the import line with others).
   - `work(cx)`: it starts with `const remove = props()?.action === "remove";`, and after
     `cx.notify();` comes
-    `try { this.error = remove ? await this.remove() : await this.create(); }`;
+    `try { this.error = remove ? await this.remove(cx) : await this.create(); }`;
     the claim runs just before that `try`, unless `remove`. It sits in `work()` rather
     than `create()` so it shares no lines with `project-worktree-settings`.
   - `create()` reads the branch from `this.text.trim()` and runs `git worktree add` with it.

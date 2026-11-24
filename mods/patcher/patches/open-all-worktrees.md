@@ -20,7 +20,7 @@ Made on top of: `use-patched-copies` (it shares lines with it in `new-menu` and 
 ## What it expects from Herdr's original
 
 - `mods/worktree/main.js`:
-  - The `import { … } from "herdr"` line, ending `readTextFile, window } from "herdr";`: the
+  - The `import { … } from "herdr"` line, ending `appHome, readTextFile } from "herdr";`: the
     patch adds `notify` at its end.
   - `init()`: `this.opening = props()?.action === "open";` (open-all counts as opening, so
     it skips `root()` and loads the checkout list), and later

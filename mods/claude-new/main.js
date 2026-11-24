@@ -26,13 +26,16 @@ import { openOverlay, run, focused, props, closeOverlay, theme, exec, home, chec
 
 // How long typing pauses before the prompt is sent for a branch name.
 const DEBOUNCE = 700;
-// Names the deliverable, not the steps: "create new mod but investigate first" -> create_new_mod.
+// <core area>_<deliverable>, not the steps: "create new mod but investigate first" -> mods_create_new_mod.
 const NAMING = "Name a git branch after the deliverable this task asks for: what will exist or be changed when it is done. " +
+  "Shape: <core area>_<deliverable>. The core area is the one word for the part of the system it touches " +
+  "(saturn, billing, auth, board...), taken from the task's own words. " +
   "Leave out how the work gets done (investigating, planning, testing, reviewing, asking first). " +
-  "Start with the verb of the deliverable (create, add, fix, remove, rename, update...); " +
-  "never with a verb for a step (investigate, explore, plan, review, check). " +
-  "Example: \"create new mod but investigate first\" -> create_new_mod. " +
-  "Reply with only the name: 2 to 5 lowercase words joined by underscores, at most 40 characters, no prefix, no quotes.";
+  "After the core area comes the verb of the deliverable (create, add, fix, remove, rename, update...); " +
+  "never a verb for a step (investigate, explore, plan, review, check). " +
+  "Examples: \"create new mod but investigate first\" -> mods_create_new_mod; " +
+  "\"Introduce Saturn engine jitter for hourly job\" -> saturn_add_hourly_job_jitter. " +
+  "Reply with only the name: 3 to 6 lowercase words joined by underscores, at most 40 characters, no prefix, no quotes.";
 
 // `claude --model` aliases and `--effort` levels; "" (Default) passes no flag.
 const MODELS = ["fable", "opus", "sonnet", "haiku"];
@@ -134,11 +137,6 @@ export default class ClaudeNew extends View {
       this.error = "";
       cx.notify();
     });
-    // Props { branch } (a Linear issue's own branch name, from the Board) fill the branch: no suggestion runs.
-    if (p?.branch) {
-      this.branch.set_value(p.branch);
-      this.typed = true;
-    }
     // Props { message } (the issue board's Start) fill the first message and suggest a branch from it.
     if (p?.message) {
       this.input.set_value(p.message);

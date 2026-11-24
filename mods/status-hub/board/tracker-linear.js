@@ -21,7 +21,7 @@ const RANK = { triage: 0, backlog: 1, unstarted: 2, started: 3, completed: 4, ca
 const CLOSED = ["completed", "canceled", "duplicate"];
 const KINDS = ["mine", "cycle", "project", "view"];
 // list_issues' fields for cards: no description (lists cut it short; Start and Edit read the issue).
-const FIELDS = ["id", "uuid", "title", "priority", "url", "gitBranchName", "updatedAt", "completedAt", "dueDate",
+const FIELDS = ["id", "uuid", "title", "priority", "url", "updatedAt", "completedAt", "dueDate",
   "status", "statusType", "labels", "assignee", "assigneeId", "teamId"];
 // How long a team's current cycle is trusted before asking again.
 const CYCLE_TTL = 60 * 60_000;
@@ -144,7 +144,6 @@ export function linearTracker() {
       state: m.status ?? null,
       type,
       assigned: Boolean(m.assigneeId ?? m.assignee),
-      branch: m.gitBranchName ?? null,
     };
   };
 
@@ -219,8 +218,8 @@ export function linearTracker() {
       await linear("save_issue", { id: item.id, state: state.id });
     },
 
-    // Reads the issue again so the description is current, then gives claude-new's props: the issue's
-    // own branch name, the board's repo; model and effort are picked in the dialog.
+    // Reads the issue again so the description is current, then gives claude-new's props: the board's repo;
+    // the branch is suggested from the message (not Linear's own name), model and effort are picked in the dialog.
     async start(board, item) {
       let fresh = item;
       try { fresh = { ...item, ...card(board, await linear("get_issue", { id: item.id })) }; } catch {}  // the card's copy will do
@@ -231,7 +230,7 @@ export function linearTracker() {
         ticket: `Linear ticket: issue ${item.ref}, team ${item.teamKey}. Keep its status updated as the work progresses (linear-ticket skill).`,
       });
       const target = await targetOf(board.repo);
-      return { ...target, message, label: item.label, ...(fresh.branch ? { branch: fresh.branch } : {}),
+      return { ...target, message, label: item.label,
         ref: { tracker: "linear", issue: item.id, identifier: item.ref, team: item.team, assigned: fresh.assigned, order: board.order } };
     },
 

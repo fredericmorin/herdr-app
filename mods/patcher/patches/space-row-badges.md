@@ -33,8 +33,10 @@ break the other's context.
   agent in `agents()` whose `space` is the row's and whose `program.key` is `claude`, one
   12px icon (the program table's `program.icon`: `icons/claude.svg` unless `programs.json`
   changes it), 3px apart, in the agents list's order, right after the space's name and
-  before its git tail (branch text, counts, ahead/behind), so before the badge too. An `idle`
-  agent's icon is dimmed (opacity 0.4); `working`, `blocked` and `done` show full. Only
+  before its git tail (branch text, counts, ahead/behind), so before the badge too. A
+  `blocked` agent's icon (waiting on you) is drawn one color, `theme().blocked` (red); a `done`
+  one (finished while you weren't looking) in `theme().done` (blue). `working` keeps the
+  program's own look at full opacity, `idle` the same dimmed (opacity 0.4). Only
   agents count: a terminal where Claude has exited (a shell again) has none, and sub-agents
   without a pane aren't in `agents()`. A space with none adds nothing to its row (an empty
   array, so no extra gap). The collapsed rail draws no icons. Clicks on them are the row's.
@@ -72,6 +74,7 @@ break the other's context.
   stale; the list still works. A gitlab.com remote without glab: `MR ?` ("glab not installed").
 - A space with two Claude Code sessions shows two Claude icons right after its name, before
   its branch and counts; a space with none shows none, its row as before.
-- A session waiting for input shows a dimmed icon; send it a message: full while it works.
-  Exit one (`/exit`): its icon goes.
+- A session waiting for input shows a dimmed icon; send it a message: full orange while it
+  works. One asking permission is red; one that finished in an unselected space is blue,
+  then dimmed once you look at it. Exit one (`/exit`): its icon goes.
 - Narrow the sidebar under 160px: the rail shows no icons.

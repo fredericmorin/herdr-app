@@ -1,8 +1,9 @@
 diff -ruN a/mods/spaces/claude-icons.js b/mods/spaces/claude-icons.js
 --- a/mods/spaces/claude-icons.js	1969-12-31 19:00:00
-+++ b/mods/spaces/claude-icons.js	2026-11-23 22:09:57
-@@ -0,0 +1,18 @@
++++ b/mods/spaces/claude-icons.js	2026-11-23 23:26:21
+@@ -0,0 +1,27 @@
 +// A space row's Claude Code sessions: one icon per agent in the space whose program is Claude,
++// in the theme's blocked color while it needs you, its done color once it finished unseen,
 +// dimmed while it's idle.
 +import { image, svg } from "gpui-kit";
 +import { h_flex } from "gpui-base";
@@ -15,14 +16,22 @@ diff -ruN a/mods/spaces/claude-icons.js b/mods/spaces/claude-icons.js
 +  const list = agents().filter((a) => a.space === space && a.program?.key === "claude" && a.program.icon);
 +  if (!list.length) return [];
 +  return [h_flex().flex_none().gap(3).items_center()
-+    .children(list.map((a) => (a.program.tint
-+      ? svg(a.program.icon).size(SIZE).flex_none().text_color(t.foreground)
-+      : image(a.program.icon).w(SIZE).h(SIZE).flex_none())
-+      .when(a.status === "idle", (el) => el.opacity(0.4))))];
++    .children(list.map((a) => icon(a, t)))];
++}
++
++function icon(a, t) {
++  // blocked and done recolor the icon (drawn as one color); the others keep the program's look.
++  if (a.status === "blocked" || a.status === "done") {
++    return svg(a.program.icon).size(SIZE).flex_none().text_color(t[a.status]);
++  }
++  const el = a.program.tint
++    ? svg(a.program.icon).size(SIZE).flex_none().text_color(t.foreground)
++    : image(a.program.icon).w(SIZE).h(SIZE).flex_none();
++  return el.when(a.status === "idle", (e) => e.opacity(0.4));
 +}
 diff -ruN a/mods/spaces/main.js b/mods/spaces/main.js
---- a/mods/spaces/main.js	2026-11-23 22:09:57
-+++ b/mods/spaces/main.js	2026-11-23 22:09:57
+--- a/mods/spaces/main.js	2026-11-23 23:26:14
++++ b/mods/spaces/main.js	2026-11-23 23:26:14
 @@ -6,6 +6,8 @@
  import { View, div, svg } from "gpui-kit";
  import { v_flex, h_flex, ScrollHandle } from "gpui-base";
@@ -52,7 +61,7 @@ diff -ruN a/mods/spaces/main.js b/mods/spaces/main.js
    compact({ w, i }, t) {
 diff -ruN a/mods/spaces/pr-status.js b/mods/spaces/pr-status.js
 --- a/mods/spaces/pr-status.js	1969-12-31 19:00:00
-+++ b/mods/spaces/pr-status.js	2026-11-23 23:04:45
++++ b/mods/spaces/pr-status.js	2026-11-23 23:26:14
 @@ -0,0 +1,80 @@
 +// The badge a space row shows for its branch's pull request (GitHub) or merge request
 +// (GitLab). The status hub (mods/status-hub) finds them and publishes `status.reviews`;

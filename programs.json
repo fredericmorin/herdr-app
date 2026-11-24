@@ -1,0 +1,5 @@
+{
+  "programs": {
+    "claude": { "run": ["/Users/fred/.config/herdr-app/mods/claude-new/claude.sh"] }
+  }
+}

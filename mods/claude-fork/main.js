@@ -3,9 +3,19 @@
 // made by the worktree dialog so the project's setup runs; same as the herdr-fork Claude skill)
 // or into a new tab of the same space. Enter forks, Tab moves between the checkbox and the branch,
 // Space flips the checkbox, Esc cancels.
+// The fork runs with its source's Claude config dir: the repo's (projects.json's board.claudeConfig) when
+// claude-new/claude.sh started the source, else Claude's default ~/.claude.
 import { View, div } from "gpui-kit";
 import { v_flex, h_flex, InputState, Input } from "gpui-base";
-import { hc, home, readTextFile, focused, openOverlay, run, props, closeOverlay, notify, theme, checking } from "herdr";
+import { hc, home, appHome, exec, readTextFile, focused, openOverlay, run, props, closeOverlay, notify, theme, checking } from "herdr";
+
+// projects.json's board.claudeConfig for folder's repo as a full path (claude-new/config-dir.mjs), null without one.
+// Throws "projects.json: …" on an invalid file or value. Same as claude-new's.
+async function configDir(folder) {
+  const r = await exec("node", [`${appHome()}/mods/claude-new/config-dir.mjs`, folder]);
+  if (r.code !== 0) throw new Error(r.stderr.trim() || `config-dir.mjs exited ${r.code}`);
+  return r.stdout.trim() || null;
+}
 
 export default class ClaudeFork extends View {
   init(_props, cx) {
@@ -51,14 +61,24 @@ export default class ClaudeFork extends View {
     if (got.code !== 0) throw new Error(got.stderr.trim() || `hc get ${target.terminal} failed`);
     const pid = JSON.parse(got.stdout).foreground?.pid;
 
-    // Claude writes ~/.claude/sessions/<pid>.json with its session id and starting folder.
-    const text = pid ? await readTextFile(`${home()}/.claude/sessions/${pid}.json`) : null;
+    // Claude writes <config dir>/sessions/<pid>.json with its session id and starting folder. Its config
+    // dir is the repo's when claude.sh started it, else the default: --resume only finds it there.
+    const own = target.cwd ? await configDir(target.cwd) : null;
+    let dir = null;
+    let text = null;
+    for (const d of [own, `${home()}/.claude`]) {
+      if (!d || !pid) continue;
+      text = await readTextFile(`${d}/sessions/${pid}.json`);
+      if (text) { dir = d; break; }
+    }
     if (!text) throw new Error(`${target.terminal} isn't running Claude Code.`);
     const session = JSON.parse(text);
-    if (!session.sessionId) throw new Error(`No session id in ~/.claude/sessions/${pid}.json`);
+    if (!session.sessionId) throw new Error(`No session id in ${dir}/sessions/${pid}.json`);
 
     const folder = session.cwd ?? target.cwd;
-    const argv = ["claude", "--resume", session.sessionId, "--fork-session"];
+    // claude.sh gives the fork the repo's dir again (same repo, a worktree of it included).
+    const launcher = dir === own ? `${appHome()}/mods/claude-new/claude.sh` : "claude";
+    const argv = [launcher, "--resume", session.sessionId, "--fork-session"];
     if (!this.worktree) {
       // --resume finds sessions by the folder Claude started in, so the fork starts there too.
       run("tab.new", { space: target.space, folder, argv });

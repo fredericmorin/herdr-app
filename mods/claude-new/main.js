@@ -20,6 +20,8 @@
 // Props { branch } fill it instead, as if typed (the Board's Linear Start: the issue's own branch name).
 // The message is multi-line: Enter adds a line, Cmd+Enter starts from anywhere in the dialog (Enter too, in the
 // branch field), Esc cancels.
+// Claude starts through ./claude.sh, which gives it the repo's Claude config dir (projects.json's
+// board.claudeConfig) as CLAUDE_CONFIG_DIR; the branch naming uses the same dir (./config-dir.mjs).
 import { View, div } from "gpui-kit";
 import { v_flex, h_flex, InputState, Input, TextareaState, Textarea } from "gpui-base";
 import { openOverlay, run, focused, props, closeOverlay, theme, exec, home, checking, setShared, spaces, appHome, readTextFile } from "herdr";
@@ -82,6 +84,14 @@ async function claudeDefaults(kind, folder, on) {
   return out;
 }
 
+// projects.json's board.claudeConfig for folder's repo as a full path (./config-dir.mjs), null without one.
+// Throws "projects.json: …" on an invalid file or value.
+async function configDir(folder) {
+  const r = await exec("node", [`${appHome()}/mods/claude-new/config-dir.mjs`, folder]);
+  if (r.code !== 0) throw new Error(r.stderr.trim() || `config-dir.mjs exited ${r.code}`);
+  return r.stdout.trim() || null;
+}
+
 // The model's reply as a slug: its last line, lowercase words joined by "_".
 function toSlug(text) {
   const line = text.trim().split("\n").pop() ?? "";
@@ -98,10 +108,13 @@ export default class ClaudeNew extends View {
     this.plan = typeof p?.plan === "boolean" ? p.plan : this.board;
     this.clicked = { worktree: false, plan: false }; // a box clicked by hand: projects.json no longer moves it
     this.settingsError = "";
+    this.on = spaces().find((s) => s.id === this.target?.space)?.machine ?? undefined;
+    // projects.json's keys are this computer's paths: another machine's space has no config dir.
+    this.claudeDir = checking() || this.on || !this.target?.cwd ? Promise.resolve(null) : configDir(this.target.cwd);
     if (!checking()) cx.spawn(async (cx) => {
-      const on = spaces().find((s) => s.id === this.target?.space)?.machine ?? undefined;
       try {
-        const d = await claudeDefaults(this.board ? "board_start" : "new_session", this.target?.cwd, on);
+        // An invalid claudeConfig shows here too, before claude.sh refuses it on Start.
+        const [d] = await Promise.all([claudeDefaults(this.board ? "board_start" : "new_session", this.target?.cwd, this.on), this.claudeDir]);
         if (d.worktree !== undefined && !this.clicked.worktree) this.worktree = d.worktree;
         if (d.plan !== undefined && !this.clicked.plan && typeof p?.plan !== "boolean") this.plan = d.plan;
       } catch (error) { this.settingsError = error.message; }
@@ -173,7 +186,8 @@ export default class ClaudeNew extends View {
       cx.spawn(async (cx) => {
         let name = "";
         try {
-          const r = await exec("claude", ["-p", "--model", "haiku", "--tools", "", "--no-session-persistence",
+          const dir = await this.claudeDir;
+          const r = await exec("env", [...(dir ? [`CLAUDE_CONFIG_DIR=${dir}`] : []), "claude", "-p", "--model", "haiku", "--tools", "", "--no-session-persistence",
             "--strict-mcp-config", "--setting-sources", "", "--system-prompt", NAMING, "--", prompt],
             { cwd: home(), timeout: 30_000 });
           const slug = r.code === 0 ? toSlug(r.stdout) : "";
@@ -214,7 +228,9 @@ export default class ClaudeNew extends View {
     // A Board start in Plan mode asks before planning.
     if (p.ref && this.plan) prompt = `${prompt}\n\n${PLAN_ASK}`.trim();
     // `--` keeps a prompt that starts with "-" from being read as an option, so options go before it.
-    const claude = ["claude", ...(this.plan ? ["--permission-mode", "plan"] : []),
+    // Another machine's space has no claude.sh (nor a projects.json of its own): plain claude there.
+    const launcher = this.on ? "claude" : `${appHome()}/mods/claude-new/claude.sh`;
+    const claude = [launcher, ...(this.plan ? ["--permission-mode", "plan"] : []),
       ...(this.model ? ["--model", this.model] : []), ...(this.effort ? ["--effort", this.effort] : []),
       ...(prompt ? ["--", prompt] : [])];
     // The terminal labels itself (HC_TERMINAL_ID is set in every core terminal), then becomes Claude.

@@ -37,7 +37,9 @@ const REFERENCE = `${START}
 //                                                           // (its MCP gives no order); "hidden": [ … ] as Linear's Hidden columns
 //                                                           // "claudeConfig": "~/.claude-personal" beside it: the Claude Code
 //                                                           // config dir whose vikunja MCP server (its token) the Board uses;
-//                                                           // default $CLAUDE_CONFIG_DIR, else ~ (the app rarely has the former)
+//                                                           // default $CLAUDE_CONFIG_DIR, else ~ (the app rarely has the former).
+//                                                           // Claude sessions Herdr starts in this repo (Board Start, Cmd+Shift+N,
+//                                                           // New worktree, forks, the + menu) get it as CLAUDE_CONFIG_DIR
 //     }
 //   }
 // }

@@ -3,7 +3,8 @@
 //   "projects": { "~/code/app": { "board": { "vikunja": 16 } } }                       a Vikunja project
 //   "projects": { "~/work/api": { "board": { "linear": { "team": "API", "mine": true } } } }  one Linear scope
 // "claudeConfig": "~/.claude-personal" beside the tracker: the Claude Code config dir whose MCP server
-// (and its token) the Board uses for Vikunja; without it, $CLAUDE_CONFIG_DIR, else ~.
+// (and its token) the Board uses for Vikunja; without it, $CLAUDE_CONFIG_DIR, else ~. Claude sessions
+// started in the repo get it too (mods/claude-new/claude.sh).
 import { readTextFile, appHome, home } from "herdr";
 
 // projects.json allows // and /* */ comments: blank them outside strings, keeping line numbers for errors.

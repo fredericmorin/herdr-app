@@ -6,14 +6,14 @@
     "cmd-m": "window.minimize",
     "cmd-t": "tab.new",
     "cmd-w": "pane.close",
-    "ctrl-tab": "keybind.pane-next",
-    "ctrl-shift-tab": "keybind.pane-prev",
+    "ctrl-tab": "tab.next",
+    "ctrl-shift-tab": "tab.prev",
     "cmd-shift-]": "tab.next",
     "cmd-shift-[": "tab.prev",
     "cmd-alt-]": "space.next",
     "cmd-alt-[": "space.prev",
-    "cmd-]": "agent.next",
-    "cmd-[": "agent.prev",
+    "cmd-]": "keybind.pane-next",
+    "cmd-[": "keybind.pane-prev",
     "cmd-shift-l": "layout.switch",
     "cmd-n": "space.new",
     "cmd-p": "mod.open:picker",
@@ -66,9 +66,7 @@
   "layout:my-main": {
     "cmd-1": { "command": "layout.select", "args": { "stack": "center", "child": "board" } },
     "cmd-2": { "command": "layout.select", "args": { "stack": "center", "child": "main" } },
-    "cmd-n": "keybind.new",
-    "cmd-]": "keybind.agent-next",
-    "cmd-[": "keybind.agent-prev"
+    "cmd-n": "keybind.new"
   },
   "terminal": {
     "cmd-f": "terminal.search",

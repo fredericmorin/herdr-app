@@ -1,6 +1,6 @@
 diff -ru a/layouts/main.json b/layouts/main.json
---- a/layouts/main.json	2026-11-24 09:41:10
-+++ b/layouts/main.json	2026-11-24 09:41:10
+--- a/layouts/main.json	2026-11-25 10:20:04
++++ b/layouts/main.json	2026-11-25 10:20:04
 @@ -57,6 +57,17 @@
                }
              },
@@ -29,10 +29,23 @@ diff -ru a/layouts/main.json b/layouts/main.json
            "size": {
              "px": 69
            },
+diff -ru -U1 a/mods/menu/main.js b/mods/menu/main.js
+--- a/mods/menu/main.js	2026-11-25 10:20:04
++++ b/mods/menu/main.js	2026-11-25 10:20:04
+@@ -114,2 +114,7 @@
+     if (!it) return;
++    // Remove worktree's checklist (remove-locked-worktrees) needs more room than the other worktree dialogs.
++    if (it[1] === "worktree" && it[2].action === "remove") {
++      closeOverlay(props()?.overlay);
++      return openOverlay({ mod: "my-worktree", kind: "dialog", width: 440, height: 380, props: it[2] });
++    }
+     closeOverlay(props()?.overlay);
+Only in b/mods/worktree: gpui-kit.d.ts
+Only in b/mods/worktree: jsconfig.json
 diff -ru a/mods/worktree/main.js b/mods/worktree/main.js
---- a/mods/worktree/main.js	2026-11-24 09:41:10
-+++ b/mods/worktree/main.js	2026-11-24 09:42:20
-@@ -110,6 +110,28 @@
+--- a/mods/worktree/main.js	2026-11-25 10:20:04
++++ b/mods/worktree/main.js	2026-11-25 10:20:04
+@@ -159,6 +159,28 @@
    return { mods, unpushed };
  }
  
@@ -61,42 +74,151 @@ diff -ru a/mods/worktree/main.js b/mods/worktree/main.js
  // The repo a folder belongs to: its main checkout and name, and whether
  // the folder is itself a linked worktree. null outside git.
  async function repoOf(folder, on) {
-@@ -144,6 +166,7 @@
+@@ -193,6 +215,11 @@
      this.repo = undefined; // undefined: looking, null: not in git
      this.dirty = false;
      this.unpushed = [];
 +    this.locked = null;
++    this.mods = [];
++    // Remove's checks still running (check()): their rows spin from the first frame.
++    this.pending = new Set(props()?.action === "remove" ? ["changes", "submodules", "lock"] : []);
++    this.failed = {}; // a check's error, by check
      cx.spawn(async (cx) => {
        try {
          if (this.on) {
-@@ -160,6 +183,7 @@
-         if (repo && props().action === "remove") {
-           this.dirty = (await git(repo.top, ["--no-optional-locks", "-c", "core.fsmonitor=false", "status", "--porcelain"], this.on)).out !== "";
-           this.unpushed = (await submodules(repo.top, this.on)).unpushed;
-+          this.locked = await lockOf(repo.top, this.on);
+@@ -204,13 +231,10 @@
          }
+         if (!this.opening && props()?.action !== "remove") this.root = await root(this.userHome);
+         this.folder = props()?.folder || place(this.space()) || this.userHome;
+-        // The repo is set last: Enter does nothing until the warnings it consents to are known.
++        // The repo is set last: Enter does nothing until it's known. Remove's checks run on after it (check()).
+         const repo = await repoOf(this.folder, this.on);
+         if (repo && !this.opening) this.worktrees = await worktreeSettings(repo, this.root, this.userHome);
+-        if (repo && props().action === "remove") {
+-          this.dirty = (await git(repo.top, ["--no-optional-locks", "-c", "core.fsmonitor=false", "status", "--porcelain"], this.on)).out !== "";
+-          this.unpushed = (await submodules(repo.top, this.on)).unpushed;
+-        }
++        if (repo && repo.linked && props().action === "remove") this.checking = this.check(repo, cx);
          if (repo && this.opening) this.list = await checkouts(repo, this.on);
          this.repo = repo;
-@@ -240,12 +264,12 @@
-     this.dirty ||= status.out !== "";
-     this.unpushed = [...new Set([...this.unpushed, ...unpushed])];
-     if (changed) return "It changed since this opened. Enter again removes it anyway.";
+         cx.notify();
+@@ -224,6 +248,61 @@
+     });
+   }
+ 
++  // Remove worktree's checks, side by side: each fills in its risk and redraws its row.
++  // Enter doesn't wait for them to start; remove() waits for them to end.
++  async check(repo, cx) {
++    const one = async (name, find) => {
++      try { await find(); }
++      catch (error) { this.failed[name] = String(error); }
++      this.pending.delete(name);
++      cx.notify();
++    };
++    // The branch Remove worktree deletes too, when the project asks for it (project-worktree-settings).
++    const branch = this.worktrees.deleteBranch;
++    if (branch) this.pending.add("branch");
++    await Promise.all([
++      ...(branch ? [one("branch", async () => { this.branch = await branchOf(repo.top, this.on); })] : []),
++      one("changes", async () => { this.dirty = (await git(repo.top, ["--no-optional-locks", "-c", "core.fsmonitor=false", "status", "--porcelain"], this.on)).out !== ""; }),
++      one("submodules", async () => { ({ mods: this.mods, unpushed: this.unpushed } = await submodules(repo.top, this.on)); }),
++      one("lock", async () => { this.locked = await lockOf(repo.top, this.on); }),
++    ]);
++  }
++
++  // What the checks have found at risk so far, to tell what an Enter consented to.
++  risks() {
++    return [...(this.dirty ? ["changes"] : []), ...(this.branch?.unpushed ? ["branch"] : []), ...this.unpushed.map((name) => `submodule ${name}`), ...(this.locked !== null ? ["lock"] : [])];
++  }
++
++  // Remove's checks, a row each: a spinner while it runs, then ✓, or ! and what is at risk.
++  renderChecks(t) {
++    const row = (name, label, ok, risk) => {
++      const waiting = this.pending.has(name);
++      const failed = this.failed[name];
++      return h_flex()
++        .gap(8)
++        .items_start()
++        .child(
++          waiting
++            ? div().w(12).flex_none().text_color(t.dim).frames(["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"], 90)
++            : div().w(12).flex_none().text_color(failed || risk ? t.blocked : t.done).child(failed ? "✗" : risk ? "!" : "✓"),
++        )
++        .child(
++          div()
++            .flex_1()
++            .text_color(waiting ? t.dim : failed || risk ? t.blocked : t.muted)
++            .child(waiting ? `${label}…` : failed ? `Couldn't check ${label.toLowerCase()}: ${failed}` : risk || ok),
++        );
++    };
++    return v_flex()
++      .gap(4)
++      .child(row("changes", "Uncommitted changes", "No uncommitted changes", this.dirty && "It has uncommitted changes: they will be lost."))
++      .child(row("submodules", "Submodule commits", "No unpushed submodule commits", this.unpushed.length > 0 && `Submodule ${this.unpushed.join(", ")} has commits that aren't pushed anywhere: they will be lost.`))
++      .child(row("lock", "Lock", "Not locked", this.locked !== null && `It's locked${lockedBy(this.locked)}: removing it overrides the lock.`))
++      .when(this.pending.has("branch") || Boolean(this.branch) || Boolean(this.failed.branch), (el) =>
++        el.child(row("branch", "Branch commits", `Branch ${this.branch?.name}'s commits are all on another branch or remote`, this.branch?.unpushed && `Branch ${this.branch.name} has commits that are on no other branch or remote: they will be lost.`)),
++      );
++  }
++
+   space() {
+     const p = props() ?? {};
+     return spaces().find((s) => s.id === p.space) ?? (p.folder ? { folder: p.folder, machine: p.machine ?? null, name: "" } : undefined);
+@@ -281,22 +360,37 @@
+ 
+   async remove(cx) {
+     const s = this.space();
+-    const status = await git(this.repo.top, ["--no-optional-locks", "-c", "core.fsmonitor=false", "status", "--porcelain"], this.on);
+-    if (!status.ok) return status.err || "git status failed.";
+-    // git refuses a worktree with submodules unless forced, because their
+-    // history goes with it. The popup already showed what's at risk; only
+-    // risk that appeared since it opened gets one more warning.
+-    const { mods, unpushed } = await submodules(this.repo.top, this.on);
+-    const changed = (status.out && !this.dirty) || unpushed.some((name) => !this.unpushed.includes(name));
+-    this.dirty ||= status.out !== "";
+-    this.unpushed = [...new Set([...this.unpushed, ...unpushed])];
+-    if (changed) return "It changed since this opened. Enter again removes it anyway.";
 -    const list = await git(this.repo.main, ["-c", "core.quotePath=false", "worktree", "list", "--porcelain"], this.on);
 -    if (!list.ok) return list.err || "git worktree list failed.";
 -    const checkout = list.out.split(/\n\n+/).map((record) => record.split("\n"))
 -      .find(([path]) => path === `worktree ${this.repo.top}`);
 -    const lock = checkout?.find((field) => field === "locked" || field.startsWith("locked "));
 -    if (lock) return lock === "locked" ? "This worktree is locked." : `This worktree is locked: ${lock.slice(7)}`;
-+    // A lock that appeared since it opened gets one more warning, like other new risk.
-+    const locked = await lockOf(this.repo.top, this.on);
-+    if (locked !== null && this.locked === null) {
-+      this.locked = locked;
-+      return `It's locked now${lockedBy(locked)}. Enter again removes it anyway.`;
++    let mods;
++    if (this.pending.size > 0) {
++      // Enter while the checks run: they are this Enter's check, and risk they find after it gets one more warning.
++      const seen = this.risks();
++      await this.checking;
++      if (Object.keys(this.failed).length > 0) return "A check failed. Enter again checks again.";
++      if (this.risks().some((risk) => !seen.includes(risk))) return "It found something at risk. Enter again removes it anyway.";
++      mods = this.mods;
++    } else {
++      const status = await git(this.repo.top, ["--no-optional-locks", "-c", "core.fsmonitor=false", "status", "--porcelain"], this.on);
++      if (!status.ok) return status.err || "git status failed.";
++      // git refuses a worktree with submodules unless forced, because their
++      // history goes with it. The popup already showed what's at risk; only
++      // risk that appeared since it opened gets one more warning.
++      const found = await submodules(this.repo.top, this.on);
++      mods = found.mods;
++      // A branch check that failed is redone here: what it finds wasn't shown yet.
++      const rebranch = Boolean(this.failed.branch);
++      if (rebranch) this.branch = await branchOf(this.repo.top, this.on);
++      const changed = (status.out && !this.dirty) || found.unpushed.some((name) => !this.unpushed.includes(name)) || (rebranch && this.branch?.unpushed);
++      this.dirty ||= status.out !== "";
++      this.unpushed = [...new Set([...this.unpushed, ...found.unpushed])];
++      this.failed = {};
++      if (changed) return "It changed since this opened. Enter again removes it anyway.";
++      // A lock that appeared since it opened gets one more warning, like other new risk.
++      const locked = await lockOf(this.repo.top, this.on);
++      if (locked !== null && this.locked === null) {
++        this.locked = locked;
++        return `It's locked now${lockedBy(locked)}. Enter again removes it anyway.`;
++      }
 +    }
  
      if (s?.id) {
        const tabs = new Set(s.tabs.map((tab) => tab.id));
-@@ -259,8 +283,10 @@
+@@ -310,8 +404,10 @@
        await cx.sleep(50);
      }
      const force = this.dirty || mods.length > 0;
@@ -109,11 +231,13 @@ diff -ru a/mods/worktree/main.js b/mods/worktree/main.js
      return "";
    }
  
-@@ -374,6 +400,7 @@
+@@ -423,8 +519,7 @@
+       .text_size(13)
+       .child(div().font_semibold().text_color(t.foreground).child(title))
        .child(div().text_color(t.muted).child(detail))
-       .when(remove && this.dirty, (el) => el.child(div().text_color(t.blocked).child("It has uncommitted changes: they will be lost.")))
-       .when(remove && this.unpushed.length > 0, (el) => el.child(div().text_color(t.blocked).child(`Submodule ${this.unpushed.join(", ")} has commits that aren't pushed anywhere: they will be lost.`)))
-+      .when(remove && this.locked !== null, (el) => el.child(div().text_color(t.blocked).child(`It's locked${lockedBy(this.locked)}: removing it overrides the lock.`)))
+-      .when(remove && this.dirty, (el) => el.child(div().text_color(t.blocked).child("It has uncommitted changes: they will be lost.")))
+-      .when(remove && this.unpushed.length > 0, (el) => el.child(div().text_color(t.blocked).child(`Submodule ${this.unpushed.join(", ")} has commits that aren't pushed anywhere: they will be lost.`)))
++      .when(remove && r !== null && (r === undefined || r.linked), (el) => el.child(this.renderChecks(t)))
        .when(!remove && !blocked, (el) =>
          el.child(
            Input.new(this.input)

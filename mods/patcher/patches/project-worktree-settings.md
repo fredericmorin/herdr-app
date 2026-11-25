@@ -25,12 +25,15 @@ In `mods/worktree` → `my-worktree` (the New / Open / Remove worktree dialog):
   early no longer leaves a worktree with no space. It's here because it replaces the
   `space.new` line this patch already owns (for the setup).
 - `deleteBranch: true`: Remove worktree also deletes the worktree's branch with
-  `git branch -D`, after `git worktree remove` succeeds. This patch only picks the branch
-  (`this.branch`); `remove-locked-worktrees` hands it to the background removal
+  `git branch -D`, after `git worktree remove` succeeds. This patch reads the setting and
+  provides `branchOf()`; `remove-locked-worktrees` calls it as one of the dialog's checks (into
+  `this.branch`) and hands the branch to the background removal
   (`mods/worktree-jobs`), which deletes it and says so in its toast. The dialog says "Deletes
-  branch <name> too." instead of "The branch stays.", and warns in the `blocked` color when the
-  branch has commits on no other local branch and no remote (they will be lost). A detached
-  checkout has no branch to delete.
+  branch <name> too." instead of "The branch stays." ("Deletes its branch too." while the
+  check runs). `this.branch.unpushed` says whether the
+  branch has commits on no other local branch and no remote (they will be lost);
+  `remove-locked-worktrees` shows that as a row of its checklist. A detached checkout has no
+  branch to delete.
 - A top-level `"worktrees": { "deleteBranch": true }` (beside `projects`) is the default for
   every repo; a project's own `deleteBranch` (true or false) wins. It's the only default.
 - A repo with no entry keeps Herdr's folder and runs no setup; it deletes branches only when
@@ -51,8 +54,8 @@ the equivalent code now lives.
   `worktreeSettings` are inserted right after it, before the `tilde` helper ("Home as ~").
 - `init()` sets `this.root` only for the New flow (not open or remove); the patch loads the
   settings right after `const repo = await repoOf(this.folder, this.on);` for New and Remove
-  (`!this.opening`; Remove gets no `dir`), and for Remove with `deleteBranch` reads the branch
-  (`branchOf`) into `this.branch`.
+  (`!this.opening`; Remove gets no `dir`). `remove-locked-worktrees` starts its checks (the
+  branch one among them) right after that line.
 - `repoOf(folder, on)` returns `{ top, main, name, linked }`, `main` being the main
   checkout's absolute path; projects.json keys are compared with it. `readTextFile` and
   `appHome` are already imported.
@@ -66,9 +69,8 @@ the equivalent code now lives.
   `import { shared as readShared, setShared as writeShared }` (aliased: `sync-new-worktrees`
   and `remove-locked-worktrees` import them too).
 - `render()`: the New description string starting "A new space on a checkout in
-  ${tilde(this.root, this.userHome)}/${r.name}/.", the Remove one ending "The branch stays.",
-  and `.when(Boolean(this.error), …)`, before which the unpushed-branch warning goes (after
-  the New input, which Remove doesn't show, so it sits under the other remove warnings).
+  ${tilde(this.root, this.userHome)}/${r.name}/." and the Remove one ending "The branch stays.".
+  The unpushed-branch warning isn't here: it's a row of `remove-locked-worktrees`' checklist.
 
 ## How to check it works
 
@@ -85,4 +87,4 @@ the equivalent code now lives.
   Top-level `"worktrees": { "deleteBranch": true }`: the same for a repo not listed; a project
   with `"deleteBranch": false` keeps its branch.
   A branch with a commit that isn't pushed or on another branch shows the "will be lost"
-  warning first. A project without it: "The branch stays." and the branch remains.
+  row in the checklist (`remove-locked-worktrees`). A project without it: "The branch stays." and the branch remains.

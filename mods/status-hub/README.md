@@ -31,9 +31,9 @@ value changed.
 - `added` / `removed`: uncommitted lines against HEAD, staged and unstaged.
 - `null`: not a git repo (or a machine that couldn't answer yet). A missing key: not looked
   at yet. Spaces that close, or move elsewhere, drop their key.
-- Updates when a space appears or moves, when a command or an agent's turn ends in it
-  (every place in that repo), when its machine comes back, when a local repo's `.git`
-  changes (watched), and every 60 s while the window is in front.
+- Updates when a space appears or moves, when it is selected, when a command or an agent's
+  turn ends in it (every place in that repo), when its machine comes back, when a local
+  repo's `.git` changes (watched), and every 60 s while the window is in front.
 - Readers: my-spaces (step 3), worktree-sync (step 2), the hub's board logic and the
   status bar (steps 4, 5).
 
@@ -53,17 +53,20 @@ value changed.
 ### `status.reviews`
 
 ```
-{ [where]: { branch, items: [Review], error? } }
+{ [where]: { branch, items: [Review], error?, refreshing? } }
 Review = { host: "github" | "gitlab", repository, number, title, url,
            state: "open" | "draft" | "merged" | "closed",
            ci: "pass" | "fail" | "running" | "queued" | "manual" | "none", failed: [{ name, url }],
            autoMerge, updatedAt, look: { icon, tone, label, ready } }
 ```
 
-- `where`: as in `status.git`; only places that are git repos. `branch`: the branch the
+- `where`: as in `status.git`; only places that are git repos, on a branch other than `main`,
+  `master` or `"(detached)"` (those are never looked up and have no key). `branch`: the branch the
   items describe: show them only while it equals `status.git[where].branch`.
 - `items`: open (and draft) ones first, most recently updated first; with none open, the
   most recent closed or merged one. Empty: no PR/MR for this branch.
+- `refreshing`: a gh/glab lookup for this place runs now; the entry holds the branch's last
+  items (none on a first look or after a branch switch) until it ends.
 - `error`: the last lookup failed (gh not logged in, offline, `"glab not installed"`).
   Items from before the error are kept while the branch is the same.
 - `repository`: `owner/repo` on GitHub, the project path (nested groups) on GitLab.
@@ -90,8 +93,9 @@ Review = { host: "github" | "gitlab", repository, number, title, url,
 - `autoMerge`: an open one is set to merge by itself once it can (GitHub's `autoMergeRequest`,
   GitLab's `merge_when_pipeline_succeeds`). Its `look.icon` is then `auto-merge` (a clock)
   instead of `pull-request`; `tone` and `label` stay the review state's.
-- Updates once a minute per place, at once when its branch changes, and when a command or an
-  agent's turn ends there (`GitStatus.takeEnded()`; not cached, at most every 10 s per place).
+- Updates once a minute per place, at once when its branch changes, and when its space is
+  selected or a command or an agent's turn ends there (`GitStatus.takeEnded()`; not cached, at
+  most every 10 s per place).
 - GitHub: every github.com remote, `gh pr list --head <branch>`, heads in the checkout's
   own remotes only; `git config branch.<b>.herdr-pr owner/repo#42` binds one PR instead.
   gh runs as `projects.json`'s `github.account` for the repo (its main checkout's entry, else

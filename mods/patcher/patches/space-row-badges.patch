@@ -1,6 +1,6 @@
 diff -ruN a/mods/spaces/claude-icons.js b/mods/spaces/claude-icons.js
 --- a/mods/spaces/claude-icons.js	1969-12-31 19:00:00
-+++ b/mods/spaces/claude-icons.js	2026-11-24 09:41:10
++++ b/mods/spaces/claude-icons.js	2026-11-25 09:40:23
 @@ -0,0 +1,35 @@
 +// A space row's Claude Code sessions: one icon per agent in the space whose program is Claude,
 +// in the theme's blocked color while it needs you, its done color once it finished unseen,
@@ -38,8 +38,8 @@ diff -ruN a/mods/spaces/claude-icons.js b/mods/spaces/claude-icons.js
 +  return el.when(a.status === "idle", (e) => e.opacity(0.4));
 +}
 diff -ruN a/mods/spaces/main.js b/mods/spaces/main.js
---- a/mods/spaces/main.js	2026-11-24 09:41:10
-+++ b/mods/spaces/main.js	2026-11-24 09:42:20
+--- a/mods/spaces/main.js	2026-11-25 09:40:23
++++ b/mods/spaces/main.js	2026-11-25 09:40:23
 @@ -6,6 +6,8 @@
  import { View, div, svg } from "gpui-kit";
  import { v_flex, h_flex, ScrollHandle } from "gpui-base";
@@ -69,8 +69,8 @@ diff -ruN a/mods/spaces/main.js b/mods/spaces/main.js
    compact({ w, i }, t) {
 diff -ruN a/mods/spaces/pr-status.js b/mods/spaces/pr-status.js
 --- a/mods/spaces/pr-status.js	1969-12-31 19:00:00
-+++ b/mods/spaces/pr-status.js	2026-11-24 09:45:35
-@@ -0,0 +1,88 @@
++++ b/mods/spaces/pr-status.js	2026-11-25 09:44:36
+@@ -0,0 +1,98 @@
 +// The badge a space row shows for its branch's pull request (GitHub) or merge request
 +// (GitLab). The status hub (mods/status-hub) finds them and publishes `status.reviews`;
 +// this only draws an entry.
@@ -113,9 +113,19 @@ diff -ruN a/mods/spaces/pr-status.js b/mods/spaces/pr-status.js
 +  return "";
 +}
 +
-+// The badge at the right of a space row: icon and number in the state's color, from a
-+// hub entry `{ branch, items, error? }`. An empty element when there's nothing to show.
++// The badge at the right of a space row, from a hub entry `{ branch, items, error?, refreshing? }`.
++// It pulses while the hub's gh/glab lookup runs; with nothing known yet, a dim PR icon pulses
++// in its place (the entry names no host, so no PR/MR text).
 +export function prBadge(id, entry, t) {
++  if (!entry?.refreshing) return reviewBadge(id, entry, t);
++  const shown = entry.items.length || entry.error
++    ? reviewBadge(id, entry, t)
++    : svg("mods/status-hub/icons/pull-request.svg").size(13).flex_none().text_color(t.dim);
++  return shown.loop("opacity", { from: 1, to: 0.4, period: 1200 });
++}
++
++// Icon and number in the state's color. An empty element when there's nothing to show.
++function reviewBadge(id, entry, t) {
 +  const items = entry?.items ?? [];
 +  if (!items.length) {
 +    if (!entry?.error) return div();

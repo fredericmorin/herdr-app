@@ -30,6 +30,9 @@ break the other's context.
   click still selects the space. When the lookup failed and nothing is known, a dim `PR ?`
   (`MR ?` when the error is glab's: the entry names no host) holds the error in its tooltip;
   a known item stays, marked stale in its tooltip.
+  While the hub's gh/glab lookup for the row runs (`entry.refreshing`), the badge pulses
+  (opacity 1 to 0.4, 1.2 s, gpui-kit's `loop`); with nothing known yet, a dim
+  `pull-request` icon pulses in its place. Nothing is added beside it, so the row doesn't shift.
 - A row shows the hub's entry only while its `branch` equals the row's git branch
   (`g?.branch`), so a branch switch hides the old badge at once, before the hub looks again.
 - `my-spaces`, Claude icons: new file `claude-icons.js`, `claudeIcons(space, t)`. For every
@@ -72,6 +75,7 @@ break the other's context.
   CI shows the same dots.
 - Cmd-click the number: the PR opens in the browser and the space isn't selected or
   dragged. A plain click selects the space.
+- Select another space: its badge pulses for as long as gh/glab runs, then stays still.
 - Switch the branch: the old PR disappears at once, the new one (if any) appears.
 - `gh auth logout` (or no network): a dim `PR ?` with the error, or the last PR marked
   stale; the list still works. A gitlab.com remote without glab: `MR ?` ("glab not installed").

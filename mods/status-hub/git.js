@@ -2,7 +2,7 @@
 // `status.git` and `status.worktrees`. Ported from my-spaces' git refresher, so the
 // keys are exactly its where() keys.
 
-import { spaces, machines, panes, exec, setShared, watchFolder, window } from "herdr";
+import { spaces, machines, panes, focused, exec, setShared, watchFolder, window } from "herdr";
 
 // Where a space is now: its first terminal's live folder, else where it was made.
 // `ps`: panes(), read once by the caller (each read copies every pane).
@@ -55,7 +55,8 @@ export class GitStatus {
     this.busy = {}; // pane -> an agent working or a program in front of its shell
     this.ready = {}; // machine -> its layout was readable at the last look
     this.at = {}; // space -> its where() at the last look
-    this.ended = new Set(); // where()s where a command or an agent's turn ended since takeEnded()
+    this.selected = null; // the focused space at the last look
+    this.ended = new Set(); // where()s where a command or an agent's turn ended, or that were selected, since takeEnded()
     this.watching = new Map(); // local repos' pending folder watches
     this.published = { git: "", worktrees: "" };
   }
@@ -72,7 +73,8 @@ export class GitStatus {
     });
   }
 
-  // The places where a command or an agent's turn ended since the last call (a push, a new PR).
+  // The places where a command or an agent's turn ended (a push, a new PR), or that were
+  // selected, since the last call.
   takeEnded() {
     const ended = [...this.ended];
     this.ended.clear();
@@ -90,8 +92,8 @@ export class GitStatus {
   }
 
   // Places whose git could have changed: new ones (a new space, a cd), where a
-  // command or an agent's turn just ended (a checkout, a commit, edits), those on
-  // a machine that is back, and repos whose fallback is due.
+  // command or an agent's turn just ended (a checkout, a commit, edits), the space just
+  // selected, those on a machine that is back, and repos whose fallback is due.
   due(now, sp, ps) {
     // Moved there: what it knew of that place may be old.
     const at = {};
@@ -113,6 +115,13 @@ export class GitStatus {
     const due = new Set([...keys].filter((k) => !(k in this.git)));
     for (const [id, k] of Object.entries(at)) if (this.at[id] && this.at[id] !== k && keys.has(k)) due.add(k);
     this.at = at;
+    // Selected: the person is looking at it, so its row should be current.
+    const selected = focused()?.space ?? null;
+    if (selected !== this.selected && keys.has(at[selected])) {
+      due.add(at[selected]);
+      this.ended.add(at[selected]);
+    }
+    this.selected = selected;
     const spaceOf = {};
     for (const s of sp) for (const t of s.tabs ?? []) spaceOf[t.id] = s;
     const busy = {};

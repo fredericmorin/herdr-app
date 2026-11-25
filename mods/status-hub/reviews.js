@@ -8,6 +8,8 @@ import { exec, setShared } from "herdr";
 import { githubAccount } from "./board/config.js";
 
 const PR_POLL_MS = 60000;
+// Branches never looked up: PRs aren't opened from them.
+const SKIPPED = new Set(["main", "master", "(detached)"]);
 // Where a command or an agent's turn just ended, looked at again at once (not cached), but not
 // more often than this: every command in a shell ends a turn.
 const NUDGE_GAP_MS = 10000;
@@ -182,7 +184,7 @@ export class ReviewStatus {
   constructor() {
     this.places = new Map(); // Current checkout snapshots, replaced on refresh.
     this.checked = new Map(); // Checkout key -> last attempt time and branch.
-    this.entries = new Map(); // Checkout key -> { branch, items, error? }.
+    this.entries = new Map(); // Checkout key -> { branch, items, error?, refreshing? }.
     this.cache = new Map(); // CLI argument list -> short-lived response cache.
     this.projectIds = new Map(); // "host/path" -> GitLab project id, for the session.
     this.nudged = new Set(); // Checkout keys to look at again at once, skipping the cache.
@@ -193,7 +195,7 @@ export class ReviewStatus {
   // is looked at once a minute, at once when its branch changes, and soon after a command or an
   // agent's turn ends there (`ended`: their keys).
   refresh(places, ended, cx) {
-    this.places = new Map(places.filter((place) => place.folder && place.repo).map((place) => [place.key, place]));
+    this.places = new Map(places.filter((place) => place.folder && place.repo && !SKIPPED.has(place.branch)).map((place) => [place.key, place]));
     for (const key of ended) if (this.places.has(key)) this.nudged.add(key);
     for (const key of this.nudged) if (!this.places.has(key)) this.nudged.delete(key);
     let gone = false;
@@ -220,6 +222,10 @@ export class ReviewStatus {
           if (!this.isCurrent(key, place)) continue;
           const fresh = this.nudged.delete(key);
           this.checked.set(key, { at: Date.now(), branch: place.branch });
+          // Shown while gh/glab runs: the branch's last items, or none yet.
+          const before = this.entries.get(key);
+          this.entries.set(key, { ...(before?.branch === place.branch ? before : { branch: place.branch, items: [] }), refreshing: true });
+          this.publish();
           try {
             const items = await this.lookup(place, fresh);
             if (this.isCurrent(key, place)) this.entries.set(key, { branch: place.branch, items });
@@ -234,6 +240,8 @@ export class ReviewStatus {
               });
             }
           }
+          // Not current any more (a branch switch): the entry it marked isn't refreshing either.
+          delete this.entries.get(key)?.refreshing;
           this.publish();
         }
       } finally {

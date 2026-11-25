@@ -17,19 +17,39 @@ const AS_ACCOUNT = 't=$(gh auth token --hostname github.com --user "$0") || exit
 const PR_FIELDS =
   "id,number,title,url,state,isDraft,headRefName,headRepository,updatedAt,statusCheckRollup,reviewDecision,mergeStateStatus,autoMergeRequest";
 const PR_LIST_FIELDS = "id,number,headRefName,headRepository";
-const PIPELINE_PENDING = new Set(["running", "pending", "created", "waiting_for_resource", "preparing", "scheduled"]);
+// GitLab pipeline statuses that haven't started running yet.
+const PIPELINE_QUEUED = new Set(["pending", "created", "waiting_for_resource", "preparing", "scheduled"]);
+// CI that will finish by itself: running, or queued to run.
+const ciUnderway = (ci) => ci === "running" || ci === "queued";
 
 const FAILED = new Set(["FAILURE", "CANCELLED", "TIMED_OUT", "ACTION_REQUIRED", "ERROR", "STARTUP_FAILURE"]);
+// CheckRun statuses that haven't started; WAITING is a deployment waiting on someone's approval.
+const RUN_QUEUED = new Set(["QUEUED", "PENDING", "REQUESTED"]);
 function ciState(rollup) {
   if (!rollup?.length) return { ci: "none", failed: [] };
   const failed = [];
-  let pending = false;
+  let running = false;
+  let queued = false;
+  let manual = false;
   for (const c of rollup) {
     const result = (c.conclusion || c.state || "").toUpperCase();
+    const status = (c.status || "").toUpperCase();
     if (FAILED.has(result)) failed.push({ name: c.name || c.context || "check", url: c.detailsUrl || c.targetUrl || null });
-    else if ((c.__typename === "CheckRun" && (c.status || "").toUpperCase() !== "COMPLETED") || result === "PENDING" || result === "EXPECTED") pending = true;
+    else if (c.__typename === "CheckRun") {
+      if (status === "IN_PROGRESS") running = true;
+      else if (status === "WAITING") manual = true;
+      else if (RUN_QUEUED.has(status)) queued = true;
+    }
+    // A status context says PENDING once its CI took the job; EXPECTED: a required one that never reported.
+    else if (result === "PENDING") running = true;
+    else if (result === "EXPECTED") queued = true;
   }
-  return { ci: failed.length ? "fail" : pending ? "pending" : "pass", failed };
+  let ci = "pass";
+  if (failed.length) ci = "fail";
+  else if (running) ci = "running";
+  else if (queued) ci = "queued";
+  else if (manual) ci = "manual";
+  return { ci, failed };
 }
 
 // Terminal PR states win over draft/CI flags left over from when it was open.
@@ -52,6 +72,11 @@ function prAppearance(pr) {
   // CLEAN is GitHub's own "mergeable now": an empty decision means no review is required.
   if (pr.mergeStateStatus === "CLEAN" && (pr.reviewDecision === "APPROVED" || !pr.reviewDecision))
     return open("ansi2", "Ready to merge", true);
+  // Approved and only waiting on checks: green, with my-spaces' CI ring beside it.
+  const approved = pr.reviewDecision === "APPROVED" || !pr.reviewDecision;
+  const ci = ciState(pr.statusCheckRollup).ci;
+  if (pr.mergeStateStatus === "BLOCKED" && approved && ciUnderway(ci))
+    return open("ansi2", `Approved, checks ${ci}`);
   if (pr.reviewDecision === "REVIEW_REQUIRED") return open("ansi4", "Needs approval");
   // GitHub computes this lazily: unknown until it has.
   if (pr.mergeStateStatus === "UNKNOWN") return open("dim", "Checking");
@@ -95,7 +120,8 @@ const MR_BLOCKED = {
 };
 
 // The same looks for a merge request, from `glab mr view`.
-function mrAppearance(state, ci, mr) {
+// `approved`: from GitLab's approvals endpoint, only asked while the MR is waiting on CI.
+function mrAppearance(state, ci, mr, approved) {
   if (state === "merged") return { icon: "merged", tone: "ansi5", label: "Merged" };
   if (state === "closed") return { icon: "closed", tone: "ansi1", label: "Closed" };
   if (state === "draft") return { icon: "draft", tone: "dim", label: "Draft" };
@@ -106,6 +132,8 @@ function mrAppearance(state, ci, mr) {
   if (mr.detailed_merge_status === "requested_changes") return open("ansi3", "Changes requested");
   if (mr.detailed_merge_status === "mergeable") return open("ansi2", "Ready to merge", true);
   if (mr.detailed_merge_status === "not_approved") return open("ansi4", "Needs approval");
+  // Approved and only waiting on CI: green, with my-spaces' CI ring beside it.
+  if (approved && ciUnderway(ci)) return open("ansi2", `Approved, checks ${ci}`);
   // GitLab re-checks lazily (e.g. after the target branch moves): unknown until it has.
   if (["unchecked", "checking", "preparing", "approvals_syncing"].includes(mr.detailed_merge_status))
     return open("dim", "Checking");
@@ -113,18 +141,20 @@ function mrAppearance(state, ci, mr) {
   return open("ansi3", MR_BLOCKED[mr.detailed_merge_status] ?? "Blocked");
 }
 
-function gitlabItem(mr, repository) {
+function gitlabItem(mr, repository, approved) {
   const state = mr.state === "opened" ? (mr.draft ? "draft" : "open") : mr.state === "merged" ? "merged" : "closed";
   const pipeline = mr.head_pipeline?.status;
   let ci = "none";
   if (pipeline === "success") ci = "pass";
   else if (pipeline === "failed" || pipeline === "canceled") ci = "fail";
-  else if (PIPELINE_PENDING.has(pipeline)) ci = "pending";
+  else if (pipeline === "running") ci = "running";
+  else if (PIPELINE_QUEUED.has(pipeline)) ci = "queued";
+  else if (pipeline === "manual") ci = "manual";
   const failed = ci === "fail" ? [{ name: "pipeline", url: mr.head_pipeline.web_url ?? null }] : [];
   return {
     host: "gitlab", repository, number: mr.iid, title: mr.title, url: mr.web_url,
     state, ci, failed, autoMerge: state === "open" && Boolean(mr.merge_when_pipeline_succeeds),
-    updatedAt: mr.updated_at ?? null, look: mrAppearance(state, ci, mr),
+    updatedAt: mr.updated_at ?? null, look: mrAppearance(state, ci, mr, approved),
   };
 }
 
@@ -296,10 +326,19 @@ export class ReviewStatus {
         // Branch names aren't unique across forks: only sources in this checkout's own remotes.
         if (mr.source_branch !== branch || !own.has(mr.source_project_id)) continue;
         const full = mr.state === "opened" ? await this.glab(["mr", "view", String(mr.iid), "-R", repo, "--output", "json"], fresh) : mr;
-        found.push({ ...gitlabItem(full, r.path), id: `${r.host}/${r.path}!${mr.iid}` });
+        found.push({ ...gitlabItem(full, r.path, await this.approvedWhileCi(r, full, fresh)), id: `${r.host}/${r.path}!${mr.iid}` });
       }
     }
     return found;
+  }
+
+  // Whether an MR blocked only by its running or queued pipeline is approved; false otherwise, without asking.
+  async approvedWhileCi(r, mr, fresh) {
+    if (!["ci_still_running", "ci_must_pass"].includes(mr.detailed_merge_status)) return false;
+    const pipeline = mr.head_pipeline?.status;
+    if (pipeline !== "running" && !PIPELINE_QUEUED.has(pipeline)) return false;
+    const approvals = await this.glab(["api", "--hostname", r.host, `projects/${mr.project_id}/merge_requests/${mr.iid}/approvals`], fresh);
+    return approvals.approved === true;
   }
 
   async projectId(r) {

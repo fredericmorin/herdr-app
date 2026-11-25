@@ -86,7 +86,8 @@ const live = (item) => item.state === "open" || item.state === "draft";
 // A review's state and checks in words, as cc-board's In review cards say them.
 function reviewText(item) {
   let checks = "";
-  if (live(item) && item.ci === "pending") checks = " · checks running";
+  if (live(item) && (item.ci === "running" || item.ci === "queued")) checks = ` · checks ${item.ci}`;
+  else if (live(item) && item.ci === "manual") checks = " · checks waiting";
   else if (live(item) && item.ci === "pass" && !item.look.ready) checks = " · checks passed";
   else if (live(item) && item.ci === "fail" && item.look.label !== "Checks failed") checks = " · checks failed";
   return `${sign(item)}${item.number} ${item.look.label}${checks}`;

@@ -27,7 +27,7 @@ diff -ru a/mods/workspace-status/main.js b/mods/workspace-status/main.js
 +      return div().id("status-review").flex_none().text_color(t.dim).tooltip(`${what} unavailable: ${entry.error}`).child(`${what} ?`);
 +    }
 +    const failed = r.failed?.length ? `\nFailed: ${r.failed.map((c) => c.name).join(", ")}` : "";
-+    const text = `${r.host === "gitlab" ? "!" : "#"}${r.number} ${r.look.label}${r.ci === "pending" ? " · checks pending" : ""}`;
++    const text = `${r.host === "gitlab" ? "!" : "#"}${r.number} ${r.look.label}${r.ci === "running" || r.ci === "queued" ? ` · checks ${r.ci}` : r.ci === "manual" ? " · checks waiting" : ""}`;
 +    return h_flex().id("status-review").flex_none().gap(6).items_center().text_color(t[r.look.tone] ?? t.muted)
 +      .tooltip(`${r.title}${failed}`).on_click((_e, cx) => cx.open_url(r.url))
 +      .child(svg(`mods/status-hub/icons/${r.look.icon}.svg`).size(13)).child(text);

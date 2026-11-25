@@ -56,7 +56,7 @@ value changed.
 { [where]: { branch, items: [Review], error? } }
 Review = { host: "github" | "gitlab", repository, number, title, url,
            state: "open" | "draft" | "merged" | "closed",
-           ci: "pass" | "fail" | "pending" | "none", failed: [{ name, url }],
+           ci: "pass" | "fail" | "running" | "queued" | "manual" | "none", failed: [{ name, url }],
            autoMerge, updatedAt, look: { icon, tone, label, ready } }
 ```
 
@@ -73,12 +73,20 @@ Review = { host: "github" | "gitlab", repository, number, title, url,
   `label` says the state ("Ready to merge", "Needs approval", "Checks failed", …); `ready`:
   mergeable now. "Needs approval": GitHub's `reviewDecision` `REVIEW_REQUIRED`, GitLab's
   `detailed_merge_status` `not_approved` (blue, `ansi4`). On GitLab only `mergeable` is green:
-  `unchecked` / `checking` (GitLab hasn't re-checked yet) are dim "Checking", and any other
+  `unchecked` / `checking` (GitLab hasn't re-checked yet) are dim "Checking", `ci_still_running` /
+  `ci_must_pass` with a running pipeline and an approved MR (the `approvals` endpoint, asked only
+  then) is green "Approved, checks running" (or "queued"), and any other
   blocking status is yellow (`ansi3`) with its reason ("Needs rebase", "Discussions open", …,
   else "Blocked"). On GitHub `mergeStateStatus` `UNKNOWN` is dim "Checking", `BEHIND` yellow
-  "Branch behind", `BLOCKED` yellow "Blocked"; green "Open" is left for `UNSTABLE` and
+  "Branch behind", `BLOCKED` yellow "Blocked" (but green "Approved, checks running" when
+  approved, or no review required, and `ci` is `running` or `queued`); green "Open" is left for `UNSTABLE` and
   `HAS_HOOKS`, which can still merge. `look` is the review state; `ci`
   is drawn beside it (my-spaces' dot).
+- `ci`: `running` while a check runs (GitHub `IN_PROGRESS` or a `PENDING` status, GitLab
+  `running`), else `queued` while one waits to start (GitHub `QUEUED`/`PENDING`/`REQUESTED`
+  or `EXPECTED`, GitLab `pending`, `created`, `waiting_for_resource`, `preparing`,
+  `scheduled`), else `manual` while one waits on someone (GitHub `WAITING`, GitLab `manual`).
+  `fail` wins over all of them.
 - `autoMerge`: an open one is set to merge by itself once it can (GitHub's `autoMergeRequest`,
   GitLab's `merge_when_pipeline_succeeds`). Its `look.icon` is then `auto-merge` (a clock)
   instead of `pull-request`; `tone` and `label` stay the review state's.

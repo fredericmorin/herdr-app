@@ -70,7 +70,7 @@ diff -ruN a/mods/spaces/main.js b/mods/spaces/main.js
 diff -ruN a/mods/spaces/pr-status.js b/mods/spaces/pr-status.js
 --- a/mods/spaces/pr-status.js	1969-12-31 19:00:00
 +++ b/mods/spaces/pr-status.js	2026-11-24 09:45:35
-@@ -0,0 +1,82 @@
+@@ -0,0 +1,88 @@
 +// The badge a space row shows for its branch's pull request (GitHub) or merge request
 +// (GitLab). The status hub (mods/status-hub) finds them and publishes `status.reviews`;
 +// this only draws an entry.
@@ -89,11 +89,15 @@ diff -ruN a/mods/spaces/pr-status.js b/mods/spaces/pr-status.js
 +// GitLab numbers its merge requests !N, GitHub its pull requests #N.
 +const sign = (item) => (item.host === "gitlab" ? "!" : "#");
 +
-+// An open or draft one's CI, beside its number: a ring while it runs, a dot once it passed or
-+// failed. The icon's color stays the review state; ready to merge already says CI passed (✓).
++// An open or draft one's CI, beside its number: a pulsing ring while it runs, a dim ring while
++// queued, a yellow square while it waits on someone (a manual job, an approval), a dot once it
++// passed or failed. The icon's color stays the review state; ready to merge already says CI passed (✓).
 +function ciMark(item, t) {
 +  if (item.look.ready || (item.state !== "open" && item.state !== "draft")) return null;
-+  if (item.ci === "pending") return div().size(7).flex_none().rounded(4).border_1().border_color(t.working);
++  if (item.ci === "running")
++    return div().size(7).flex_none().rounded(4).border_1().border_color(t.working).loop("opacity", { from: 1, to: 0.3, period: 1000 });
++  if (item.ci === "queued") return div().size(7).flex_none().rounded(4).border_1().border_color(t.dim);
++  if (item.ci === "manual") return div().size(6).flex_none().rounded(1).bg(t.ansi3);
 +  if (item.ci === "pass") return div().size(6).flex_none().rounded(3).bg(t.ansi2);
 +  if (item.ci === "fail") return div().size(6).flex_none().rounded(3).bg(t.ansi1);
 +  return null;
@@ -101,7 +105,9 @@ diff -ruN a/mods/spaces/pr-status.js b/mods/spaces/pr-status.js
 +
 +// The tooltip's CI line, empty without CI.
 +function ciLine(item) {
-+  if (item.ci === "pending") return "\nChecks running";
++  if (item.ci === "running") return "\nChecks running";
++  if (item.ci === "queued") return "\nChecks queued";
++  if (item.ci === "manual") return "\nChecks waiting on someone (manual job or approval)";
 +  if (item.ci === "pass") return "\nChecks passed";
 +  if (item.ci === "fail") return `\nChecks failed${item.failed.length ? `: ${item.failed.map((f) => f.name).join(", ")}` : ""}`;
 +  return "";

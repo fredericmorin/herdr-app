@@ -27,10 +27,9 @@ export default class ClaudeFork extends View {
     this.branch.on("submit", (_e, cx) => this.submit(cx));
     this.at = "toggle"; // what has the keyboard, for Tab: "toggle" or "branch"
     this.branch.on("focus", (_e, cx) => { this.at = "branch"; cx.notify(); });
-    this.toggleHandle = cx.focus_handle();
-    this.toggleHandle.focus();
+    this.handle.focus();
     // Refocus late in case opening took the keyboard, unless Tab has already moved on.
-    cx.timer.after(600, () => { if (this.at === "toggle") this.toggleHandle.focus(); });
+    cx.timer.after(600, () => { if (this.at === "toggle") this.handle.focus(); });
     // The window binds Tab to move focus across the whole window, before any on_key_down
     // sees it: bindings of our own, deeper in, come first and keep Tab in the dialog.
     cx.bind_keys([
@@ -42,6 +41,7 @@ export default class ClaudeFork extends View {
   submit(cx) {
     if (checking() || this.busy) return;
     this.busy = true;
+    cx.notify();
     cx.spawn(async () => {
       try {
         await this.fork(this.target);
@@ -94,6 +94,12 @@ export default class ClaudeFork extends View {
   key(e, cx) {
     if (e.key === "escape") { closeOverlay(props().overlay); cx.stop_propagation(); }
     if (e.key === "enter") { this.submit(cx); cx.stop_propagation(); }
+    if (e.keystroke === "space" && this.at === "toggle") { this.flip(cx); cx.stop_propagation(); }
+  }
+
+  flip(cx) {
+    this.worktree = !this.worktree;
+    this.focusAt("toggle", cx);
   }
 
   cycle(step, cx) {
@@ -104,7 +110,7 @@ export default class ClaudeFork extends View {
   focusAt(at, cx) {
     this.at = at;
     if (at === "branch") this.branch.focus();
-    else this.toggleHandle.focus();
+    else this.handle.focus();
     cx.notify();
   }
 
@@ -114,14 +120,11 @@ export default class ClaudeFork extends View {
       .border_1().border_color(primary ? t.solid : t.input).bg(primary ? t.solid : t.raised)
       .text_color(primary ? t.solid_foreground : t.foreground).text_size(12.5).font_medium().cursor_pointer()
       .hover(s => s.opacity(0.88)).on_click(action).child(text);
-    // Focusable so Tab reaches it; Space flips it through on_click (GPUI clicks a focused element on Space).
-    // Flipping leaves the keyboard on it, inside the dialog, so Enter still forks.
-    const toggle = h_flex().id("cf-worktree").track_focus(this.toggleHandle).gap(8).items_center().cursor_pointer()
+    // Not focusable: GPUI clicks a focused element on Enter too, so Enter would flip it as it forks.
+    // The dialog keeps the keyboard while `at` is "toggle", and key() flips it on Space.
+    const toggle = h_flex().id("cf-worktree").gap(8).items_center().cursor_pointer()
       .px(4).py(2).rounded(6).border_1().border_color(this.at === "toggle" ? t.accent : t.popover)
-      .on_click((_e, cx) => {
-        this.worktree = !this.worktree;
-        this.focusAt("toggle", cx);
-      })
+      .on_click((_e, cx) => this.flip(cx))
       .child(h_flex().w(16).h(16).rounded(4).border_1().items_center().justify_center()
         .border_color(this.worktree ? t.accent : t.input).bg(this.worktree ? t.accent : t.background)
         .text_size(11).text_color(t.accent_foreground).child(this.worktree ? "✓" : ""))
